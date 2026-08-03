@@ -130,6 +130,24 @@ class Config:
                                          # been unseen this long (avoids lingering "ghost"
                                          # boxes); the track itself lives until the timeout
     min_confidence: float = 0.5          # ignore person/object detections below this score
+    # Per-label overrides layered on top of min_confidence (person/object labels)
+    # or pest_confidence (pest labels): a label present here replaces its
+    # category's shared threshold; any label absent still falls back to the
+    # category default. See --class-confidence.
+    #
+    # suitcase/mouse are raised here on direct evidence from a real deployment
+    # log (runtime/logs/events.csv): both classes repeatedly triggered right at
+    # the old flat 0.5 floor (scores as low as 0.44-0.56), and that session
+    # showed severe bag-track fragmentation (one physical object spawning dozens
+    # of short-lived track ids) consistent with noisy, borderline detections
+    # being fed to the tracker. rat is intentionally left at the pest_confidence
+    # default: its poor real-world hit rate traces to training data (the "rat"
+    # class was trained on Hamster images, never a real rat -- see
+    # docs/MODELS.md), which no confidence threshold can fix.
+    class_confidence: dict[str, float] = field(default_factory=lambda: {
+        "suitcase": 0.55,
+        "mouse": 0.55,
+    })
     box_smoothing: float = 0.6           # weight of the newest detection when smoothing a
                                          # track's drawn box (1.0 = no smoothing); damps
                                          # frame-to-frame detector jitter on static objects
@@ -166,6 +184,19 @@ class Config:
     pest_alert_cooldown_sec: float = 30.0  # seconds between repeat alerts for the same pest
     pest_timeout_sec: float = 2.0        # drop a pest track (and reset confirmation) after
                                          # this long unseen
+    pest_match_radius: float = 220.0     # px gate for matching a pest detection to its track
+                                         # between frames. Deliberately separate from
+                                         # stationary_radius (tuned for a stationary bag): a
+                                         # moving rat/mouse displaces much further frame-to-
+                                         # frame, and sharing the bag's tighter radius let a
+                                         # real pest's track keep breaking before it could
+                                         # accumulate pest_confirmation_frames/time -- i.e. a
+                                         # genuinely present pest could go unconfirmed forever.
+
+    def confidence_for(self, label: str, category_default: float) -> float:
+        """Effective confidence threshold for one label: class_confidence override,
+        else the caller's category default (min_confidence or pest_confidence)."""
+        return self.class_confidence.get(label, category_default)
 
     def __post_init__(self) -> None:
         # Derive snapshot/log dirs from runtime_dir unless explicitly overridden.
@@ -298,16 +329,21 @@ def split_detections(detections: list[Detection], config: Config
     """Route detections into the three functional categories.
 
     People and objects use ``min_confidence``; pests use their own
-    ``pest_confidence`` so rodents can be caught at a different threshold. The
+    ``pest_confidence`` so rodents can be caught at a different threshold.
+    Either category default can be overridden per-label via
+    ``config.class_confidence`` (see ``Config.confidence_for``). The
     categories are disjoint by label set, so a rat/mouse can never fall into
     the unattended-object bucket.
     """
     persons = [d for d in detections
-               if d.label in config.person_labels and d.score >= config.min_confidence]
+               if d.label in config.person_labels
+               and d.score >= config.confidence_for(d.label, config.min_confidence)]
     objects = [d for d in detections
-               if d.label in config.unattended_object_labels and d.score >= config.min_confidence]
+               if d.label in config.unattended_object_labels
+               and d.score >= config.confidence_for(d.label, config.min_confidence)]
     pests = [d for d in detections
-             if d.label in config.pest_labels and d.score >= config.pest_confidence]
+             if d.label in config.pest_labels
+             and d.score >= config.confidence_for(d.label, config.pest_confidence)]
     return persons, objects, pests
 
 
@@ -371,10 +407,12 @@ class IMX500Detector:
                 "IMX500 support is unavailable. Install the Pi camera stack: "
                 "`sudo apt install -y python3-picamera2 imx500-all`."
             )
-        # Use the lowest of the two category thresholds so pest candidates below
-        # min_confidence still reach split_detections(), which then applies each
-        # category's own threshold.
-        self.threshold = min(config.min_confidence, config.pest_confidence)
+        # Use the lowest of every effective threshold (the two category defaults
+        # plus any class_confidence overrides, which may sit below their
+        # category default) so no candidate is dropped here before
+        # split_detections() applies its precise per-label gate.
+        self.threshold = min([config.min_confidence, config.pest_confidence,
+                              *config.class_confidence.values()])
         self.iou = config.iou
         self.max_detections = config.max_detections
 
@@ -753,7 +791,7 @@ class PestTracker:
         detections = dedup_detections(detections)
         matches = match_detections(detections, list(self.pests.values()),
                                    iou_gate=0.3,
-                                   dist_gate=self.config.stationary_radius)
+                                   dist_gate=self.config.pest_match_radius)
         for di, det in enumerate(detections):
             pest = matches.get(di)
             if pest is None:
@@ -1296,6 +1334,12 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "bags vanish; the unattended timer keeps running while coasting.")
     p.add_argument("--min-confidence", type=float, default=d.min_confidence,
                    help="Minimum person/object detection confidence 0..1 (default: %(default)s).")
+    p.add_argument("--class-confidence", nargs="+", default=[], metavar="LABEL=VALUE",
+                   help="Per-label confidence overrides layered on top of "
+                        "--min-confidence (person/object labels) or "
+                        "--pest-confidence (pest labels), e.g. "
+                        "--class-confidence suitcase=0.55 backpack=0.45. Repeat to set "
+                        f"multiple labels (built-in overrides: {d.class_confidence}).")
     p.add_argument("--box-smoothing", type=float, default=d.box_smoothing,
                    help="Weight of the newest detection when smoothing drawn boxes, "
                         "0..1 (default: %(default)s). Lower = steadier boxes on static "
@@ -1328,6 +1372,12 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "%(default)s). Set 0 to confirm by duration only.")
     p.add_argument("--pest-alert-cooldown", type=float, default=d.pest_alert_cooldown_sec,
                    help="Seconds between repeat alerts for the same pest (default: %(default)s).")
+    p.add_argument("--pest-match-radius", type=float, default=d.pest_match_radius,
+                   help="Px gate for matching a pest detection to its track between frames "
+                        "(default: %(default)s). Separate from --stationary-radius (bag-"
+                        "tuned) because a moving rat/mouse displaces further between frames "
+                        "than a stationary bag; raise it if a real pest's track keeps "
+                        "breaking before it can be confirmed.")
     # --- Mode / runtime output -------------------------------------------
     p.add_argument("--headless", action="store_true",
                    help="Run without a preview window; only save alert snapshots.")
@@ -1384,6 +1434,17 @@ def parse_args(argv=None) -> argparse.Namespace:
     return args
 
 
+def _merge_class_confidence(pairs: list[str], base: dict[str, float]) -> dict[str, float]:
+    """Merge --class-confidence LABEL=VALUE pairs onto the built-in defaults."""
+    merged = dict(base)
+    for pair in pairs:
+        label, sep, value = pair.partition("=")
+        if not sep:
+            raise SystemExit(f"--class-confidence expects LABEL=VALUE, got {pair!r}")
+        merged[label.strip().lower()] = float(value)
+    return merged
+
+
 def main(argv=None) -> None:
     args = parse_args(argv)
     logging.basicConfig(
@@ -1398,6 +1459,7 @@ def main(argv=None) -> None:
         owner_claim_sec=args.owner_claim_time,
         track_timeout_sec=args.timeout,
         min_confidence=args.min_confidence,
+        class_confidence=_merge_class_confidence(args.class_confidence, Config().class_confidence),
         box_smoothing=args.box_smoothing,
         headless=args.headless,
         alert_cooldown_sec=args.alert_cooldown,
@@ -1417,6 +1479,7 @@ def main(argv=None) -> None:
         pest_confirmation_time=args.pest_confirmation_time,
         pest_confirmation_frames=args.pest_confirmation_frames,
         pest_alert_cooldown_sec=args.pest_alert_cooldown,
+        pest_match_radius=args.pest_match_radius,
     )
     client = _build_flowguard_client(args, config)
     run(config, client=client)

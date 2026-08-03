@@ -24,6 +24,8 @@ onnxslim>=0.1           # used by ultralytics `export(..., simplify=True)`
 
 # --- Dataset acquisition & formatting ---
 fiftyone>=0.23          # COCO + Open Images download in dataset_prep.py
+pyyaml>=6.0             # reads a source dataset's data.yaml in
+                        # import_external_rat_images (dataset_prep.py)
 
 # --- IMX500 compilation (.onnx -> .rpk) ---
 # Provides the `imx500-converter` / `imxconv-pt` / `sdspconv` CLI used by

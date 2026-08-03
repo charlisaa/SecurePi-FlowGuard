@@ -1,0 +1,6 @@
+person
+backpack
+handbag
+suitcase
+rat
+mouse

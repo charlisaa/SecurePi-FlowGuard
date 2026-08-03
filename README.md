@@ -193,10 +193,20 @@ setup help; it validates the return code, verifies the `.rpk` exists and is
 non-empty, and never writes a placeholder. A successful build is **not** proof
 of runtime compatibility (see below).
 
+**Rat images are not part of the automated download.** Open Images v7 (used by
+`dataset_prep.py` for the other classes) has no boxable "Rat" class, only
+"Mouse" — a prior version of this pipeline used Hamster images as a stand-in,
+which trained a model that had never seen a real rat. To populate the `rat`
+class, download a real rat-detection dataset in YOLO format (see
+[docs/MODELS.md](docs/MODELS.md#retraining-the-rat-class-with-real-images) for
+recommended sources), drop it in `training/external/rat_dataset/`, and
+`dataset_prep.py` merges it in automatically (step 4/4).
+
 See [docs/implementation-plan.md](docs/implementation-plan.md) for the
 step-by-step Colab guide.
 
-## Model deployment workflow
+## Model deployment work
+`````````````````````flow
 
 1. Compile off-device (above) to get `imx500_custom_securepi.rpk`.
 2. Copy it into `models/` on the Pi (git-ignored; place manually):

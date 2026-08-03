@@ -22,11 +22,9 @@ env/
 dataset/
 fiftyone/
 runs/
+training/external/
 
-# --- Model weights & compiled models (placed manually; see models/README.md) ---
-*.pt
-*.onnx
-*.rpk
+
 
 # --- Runtime output (generated on the Pi at runtime) ---
 runtime/

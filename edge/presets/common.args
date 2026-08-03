@@ -29,6 +29,10 @@
 # --model /usr/share/imx500-models/imx500_network_nanodet_plus_416x416_pp.rpk
 # --unattended-object-labels backpack handbag suitcase   # NEVER put rat/mouse here
 # --person-labels person
+# Per-label overrides on top of --min-confidence/--pest-confidence (built-in
+# defaults: suitcase/mouse raised to 0.55 — see Config.class_confidence in
+# edge/securePi.py for why). Add more here as real deployment logs justify them:
+# --class-confidence suitcase=0.55 mouse=0.55 backpack=0.45
 
 # --- Pest detection (rat/mouse) — separate logic, no owner association ---
 # Meaningful only with the custom model + models/labels.txt (default COCO
@@ -38,6 +42,9 @@
 --pest-confirmation-time 2       # confirm after visible this many seconds...
 --pest-confirmation-frames 3     # ...OR this many consecutive frames (0 disables)
 --pest-alert-cooldown 30         # seconds between repeat alerts for the same pest
+--pest-match-radius 220          # px gate for matching a pest to its track between
+                                  # frames — wider than --stationary-radius because a
+                                  # moving rat/mouse displaces more than a stationary bag
 
 # --- Mode ---
 # --headless                # uncomment for SSH / systemd use
