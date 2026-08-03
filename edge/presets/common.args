@@ -1,0 +1,55 @@
+# SecurePi shared base settings — applied automatically before any preset.
+# Location presets (lobby.args, kitchen.args, ...) override only what differs;
+# run one of those, not this file:
+#   python edge/securePi.py @lobby.args
+# One flag per line (value on the same line is fine); anything after # is a
+# comment. Later flags win, so a location preset or the command line overrides
+# anything set here.
+
+# --- Alerting (unattended objects) ---
+--unattended-time 120       # seconds before an unattended object alerts
+--alert-cooldown 30         # seconds between repeat alerts per object
+--max-snapshots 500         # keep newest N snapshots; protects the SD card
+
+# --- Runtime output ---
+# Snapshots/logs/alerts default to <repo>/runtime/ (git-ignored). Location
+# presets set --zone so snapshots group under runtime/snapshots/<zone> and the
+# zone is recorded in runtime/logs/events.csv. Override the root if needed:
+# --runtime-dir /var/lib/securepi
+
+# --- Tracking / association ---
+--proximity 150             # px within which the owner attends an object
+--owner-claim-time 3        # seconds a new object waits to adopt an owner
+--stationary-radius 120     # px an object may move and still match its track
+--timeout 10                # seconds a track coasts through dropouts
+--box-smoothing 0.6         # 0..1, lower = steadier boxes; 1.0 = off
+
+# --- Detection ---
+--min-confidence 0.5
+# --model /usr/share/imx500-models/imx500_network_nanodet_plus_416x416_pp.rpk
+# --unattended-object-labels backpack handbag suitcase   # NEVER put rat/mouse here
+# --person-labels person
+
+# --- Pest detection (rat/mouse) — separate logic, no owner association ---
+# Meaningful only with the custom model + models/labels.txt (default COCO
+# "mouse" = computer mouse, and "rat" is not a COCO class).
+--pest-labels rat mouse
+--pest-confidence 0.50           # separate confidence threshold for pests
+--pest-confirmation-time 2       # confirm after visible this many seconds...
+--pest-confirmation-frames 3     # ...OR this many consecutive frames (0 disables)
+--pest-alert-cooldown 30         # seconds between repeat alerts for the same pest
+
+# --- Mode ---
+# --headless                # uncomment for SSH / systemd use
+# -v                        # uncomment for debug logging
+
+# --- FlowGuard cloud integration (edge -> backend) ---
+# OFF by default: the monitor runs fully offline (local snapshots + events.csv).
+# Prefer configuring this via environment variables (see deploy/securepi.env.example)
+# so the secret token never sits in a preset — FLOWGUARD_EDGE_ENABLED,
+# FLOWGUARD_API_URL, EDGE_INGEST_TOKEN, SECUREPI_DEVICE_ID, SECUREPI_CAMERA_LOCATION.
+# The equivalent CLI flags exist for ad-hoc use (the token stays env-only):
+# --flowguard-enabled
+# --flowguard-url https://your-flowguard-server.example
+# --device-id securepi-lobby-01
+# --camera-location "Lobby Camera 01"

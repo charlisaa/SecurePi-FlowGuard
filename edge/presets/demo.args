@@ -1,0 +1,10 @@
+# SecurePi — DEMO preset for live presentations:  python edge/securePi.py @demo.args
+# presets/common.args is applied automatically as the base; this file only
+# overrides what differs. Tuned so the full attended → warning → ALERT cycle
+# plays out in seconds instead of minutes.
+
+--zone demo                 # tags the event log; snapshots -> runtime/snapshots/demo
+--unattended-time 10        # alert just 10s after the owner walks away
+--owner-claim-time 5        # generous window to adopt the presenter as owner
+--alert-cooldown 15         # re-alert quickly if the demo runs long
+--pest-confirmation-time 1  # confirm pests fast for the demo

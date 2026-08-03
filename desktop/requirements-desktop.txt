@@ -1,0 +1,17 @@
+# SecurePi — DESKTOP GUI dependencies (app_gui.py).
+#
+# A Tkinter dashboard for running the trained YOLO model on a webcam / image /
+# video file on a normal computer (Windows/macOS/Linux) — useful for previewing
+# and demoing detections BEFORE compiling to the IMX500. This is NOT installed
+# on the Raspberry Pi.
+#
+# It performs YOLO *inference* only (no training). It deliberately does NOT pull
+# in FiftyOne, ONNX export tooling, or the IMX500 converter.
+#
+# Tkinter ships with the standard CPython installer on Windows/macOS. On Linux
+# install it via the system package manager, e.g.:  sudo apt install python3-tk
+
+ultralytics>=8.0        # YOLO() inference on the trained best.pt / best.onnx
+opencv-python>=4.5      # frame capture, drawing, snapshot writing
+numpy>=1.21
+Pillow>=9.0             # convert frames to Tk images for display

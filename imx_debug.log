@@ -1,0 +1,232 @@
+[0:12:46.871903725] [14931] [1;32m INFO [1;37mCamera [1;34mcamera_manager.cpp:330 [0mlibcamera v0.5.2+99-bfd68f78
+[0:12:46.880240850] [14949] [1;32m INFO [1;37mRPI [1;34mpisp.cpp:720 [0mlibpisp version v1.2.1 981977ff21f3 29-04-2025 (14:13:50)
+[0:12:46.883223621] [14949] [1;32m INFO [1;37mIPAProxy [1;34mipa_proxy.cpp:180 [0mUsing tuning file /usr/share/libcamera/ipa/rpi/pisp/imx500.json
+[0:12:46.893086515] [14949] [1;32m INFO [1;37mCamera [1;34mcamera_manager.cpp:220 [0mAdding camera '/base/axi/pcie@1000120000/rp1/i2c@88000/imx500@1a' for pipeline handler rpi/pisp
+[0:12:46.893103734] [14949] [1;32m INFO [1;37mRPI [1;34mpisp.cpp:1179 [0mRegistered camera /base/axi/pcie@1000120000/rp1/i2c@88000/imx500@1a to CFE device /dev/media1 and ISP device /dev/media2 using PiSP variant BCM2712_D0
+
+------------------------------------------------------------------------------------------------------------------
+NOTE: Loading network firmware onto the IMX500 can take several minutes, please do not close down the application.
+------------------------------------------------------------------------------------------------------------------
+
+13:46:52 [INFO] Initialization successful.
+13:46:52 [INFO] Camera now open.
+13:46:52 [DEBUG] <libcamera._libcamera.CameraManager object at 0x7fff46b556f0>
+13:46:52 [DEBUG] Requesting configuration: {'use_case': 'preview', 'transform': <libcamera.Transform 'identity'>, 'colour_space': <libcamera.ColorSpace 'sYCC'>, 'buffer_count': 6, 'queue': True, 'main': {'format': 'RGB888', 'size': (640, 480), 'preserve_ar': True, 'stride': 1920, 'framesize': 921600}, 'lores': None, 'raw': {'format': 'RGGB_PISP_COMP1', 'size': (2028, 1520), 'stride': 2048, 'framesize': 3112960}, 'controls': {'NoiseReductionMode': <NoiseReductionModeEnum.Minimal: 3>, 'FrameDurationLimits': (100, 83333), 'FrameRate': 30.0}, 'sensor': {'bit_depth': 10, 'output_size': (2028, 1520)}, 'display': 'main', 'encode': 'main'}
+13:46:52 [INFO] Camera configuration has been adjusted!
+[0:12:46.938640664] [14931] [1;32m INFO [1;37mCamera [1;34mcamera.cpp:1215 [0mconfiguring streams: (0) 640x480-RGB888/sRGB (1) 2028x1520-RGGB_PISP_COMP1/RAW
+[0:12:46.938826353] [14949] [1;32m INFO [1;37mRPI [1;34mpisp.cpp:1483 [0mSensor: /base/axi/pcie@1000120000/rp1/i2c@88000/imx500@1a - Selected sensor format: 2028x1520-SRGGB10_1X10/RAW - Selected CFE format: 2028x1520-PC1R/RAW
+13:46:52 [INFO] Configuration successful!
+13:46:52 [DEBUG] Final configuration: {'use_case': 'preview', 'transform': <libcamera.Transform 'identity'>, 'colour_space': <libcamera.ColorSpace 'sYCC'>, 'buffer_count': 6, 'queue': True, 'main': {'format': 'RGB888', 'size': (640, 480), 'preserve_ar': True, 'stride': 1920, 'framesize': 921600}, 'lores': None, 'raw': {'format': 'RGGB_PISP_COMP1', 'size': (2028, 1520), 'stride': 2048, 'framesize': 3112960}, 'controls': {'NoiseReductionMode': <NoiseReductionModeEnum.Minimal: 3>, 'FrameDurationLimits': (100, 83333), 'FrameRate': 30.0}, 'sensor': {'bit_depth': 10, 'output_size': (2028, 1520)}, 'display': 'main', 'encode': 'main'}
+13:46:52 [DEBUG] Streams: {'main': <libcamera._libcamera.Stream object at 0x7fff46b8c0b0>, 'lores': None, 'raw': <libcamera._libcamera.Stream object at 0x7fff46b8c9b0>}
+13:46:52 [DEBUG] Allocated 6 buffers for stream 0 with fds [33, 36, 39, 42, 45, 48]
+13:46:52 [DEBUG] Allocated 6 buffers for stream 1 with fds [56, 59, 62, 65, 68, 71]
+Network Firmware Upload: 0.00bytes [00:00, ?bytes/s]13:46:52 [INFO] Camera started
+13:46:52 [INFO] Security monitor started (headless mode). Press 'q' in the window to quit.
+Network Firmware Upload:   0%|          | 0.00/2.93M [00:01<?, ?bytes/s]Network Firmware Upload:  34%|███▍      | 1.00M/2.93M [00:02<00:00, 2.10Mbytes/s]Network Firmware Upload:  68%|██████▊   | 2.00M/2.93M [00:03<00:00, 1.32Mbytes/s]Network Firmware Upload: 100%|██████████| 2.93M/2.93M [00:03<00:00, 1.54Mbytes/s]Network Firmware Upload: 100%|██████████| 2.93M/2.93M [00:03<00:00, 877kbytes/s] 
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b993d0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b993d0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b993d0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b993d0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b993d0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b993d0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b993d0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b993d0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff4723a8d0>
+13:46:56 [WARNING] IMX RAW OUTPUTS: [{'index': 0, 'shape': (1, 100, 4), 'dtype': 'float32', 'min': 0.0, 'max': 321.0, 'first_values': [2.0, 0.0, 316.0, 314.0, 2.0, 0.0, 318.0, 316.0, 0.0, 0.0, 294.0, 318.0]}, {'index': 1, 'shape': (1, 100), 'dtype': 'float32', 'min': 0.0, 'max': 0.77734375, 'first_values': [0.77734375, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, {'index': 2, 'shape': (1, 100), 'dtype': 'float32', 'min': 0.0, 'max': 5.0, 'first_values': [0.0, 5.0, 1.0, 3.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 0.0]}, {'index': 3, 'shape': (1, 1), 'dtype': 'float32', 'min': 1.0, 'max': 1.0, 'first_values': [1.0]}]
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b9bfd0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b9bd10>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b9bed0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b9bb50>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff46b9bcd0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040310>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040850>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040750>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040ad0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040890>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040410>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040d90>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041190>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440408d0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040090>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440404d0>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041290>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040c50>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040550>
+13:46:56 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040510>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040b50>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041490>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040750>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040fd0>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040f50>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040150>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440408d0>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041250>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040090>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440407d0>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040510>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040050>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040710>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040b50>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041110>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040090>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040190>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041350>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440400d0>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040f50>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040750>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040ad0>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040090>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041150>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440414d0>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040bd0>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041250>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040b10>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040dd0>
+13:46:57 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040190>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040210>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040510>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040050>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040090>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440402d0>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040810>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040350>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041410>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040bd0>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040650>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040610>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440413d0>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040510>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040f10>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440400d0>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040050>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041210>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040750>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041110>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041190>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040690>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040250>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040f90>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040610>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440413d0>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040710>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040510>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040b10>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041390>
+13:46:58 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041250>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040ed0>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040310>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041010>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041490>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040690>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040bd0>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440414d0>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041190>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041310>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040b50>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040510>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040150>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040310>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041350>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440407d0>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041010>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040190>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040510>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040850>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040750>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040ad0>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040690>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040bd0>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440413d0>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040150>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440414d0>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040a90>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041410>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440410d0>
+13:46:59 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040c50>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040310>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040850>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041210>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040ad0>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440407d0>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041310>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040650>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041110>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041490>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040690>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041410>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040a90>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440403d0>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040bd0>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040250>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040f50>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440410d0>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040710>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040490>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041310>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041090>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041410>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440403d0>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040850>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040a90>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440404d0>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041310>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040050>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440414d0>
+13:47:00 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440400d0>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040f50>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041410>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041390>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041090>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040890>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440411d0>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440402d0>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040b50>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040ed0>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040490>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040050>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041310>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440413d0>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040310>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040250>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040c50>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440414d0>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041350>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040610>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440402d0>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040f50>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041110>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041210>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040650>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440410d0>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041050>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040310>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440413d0>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040690>
+13:47:01 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040ed0>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041190>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040f10>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040250>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040b10>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040d90>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041210>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440414d0>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040050>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041410>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041450>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440406d0>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040150>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040ed0>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040690>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040f90>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440410d0>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440403d0>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040b50>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44041190>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff440411d0>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040210>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040050>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040850>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040ed0>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040f90>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040b10>
+13:47:02 [DEBUG] Execute job: <picamera2.job.Job object at 0x7fff44040690>

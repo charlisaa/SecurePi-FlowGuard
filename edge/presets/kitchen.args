@@ -1,0 +1,8 @@
+# SecurePi — KITCHEN preset:  python edge/securePi.py @kitchen.args
+# presets/common.args is applied automatically as the base; this file only
+# overrides what differs for this location.
+
+# Staff area: bags legitimately sit around longer, so be patient.
+# Kitchens are a common pest hotspot, so keep the rodent detector responsive.
+--zone kitchen
+--unattended-time 300

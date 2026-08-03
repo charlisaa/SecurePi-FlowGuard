@@ -1,0 +1,45 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# --- Virtual environments ---
+.venv/
+venv/
+venv311/
+env/
+
+# --- Secrets / local config ---
+.env
+*.env
+!deploy/*.env.example
+
+# --- Datasets & training artefacts (generated off-device, never committed) ---
+dataset/
+fiftyone/
+runs/
+
+# --- Model weights & compiled models (placed manually; see models/README.md) ---
+*.pt
+*.onnx
+*.rpk
+
+# --- Runtime output (generated on the Pi at runtime) ---
+runtime/
+alerts/
+logs/
+snapshots/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Claude Code agent files — internal notes / local settings, do not publish ---
+memory/
+.claude/

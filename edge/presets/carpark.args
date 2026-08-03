@@ -1,0 +1,11 @@
+# SecurePi — CARPARK preset:  python edge/securePi.py @carpark.args
+# presets/common.args is applied automatically as the base; this file only
+# overrides what differs for this location.
+
+# Outdoor area viewed from further away: objects appear smaller and move more
+# px between frames, and detection is less reliable than indoors.
+--zone carpark
+--unattended-time 180       # people legitimately step away from luggage briefly
+--proximity 180             # wider owner radius — distances shrink at long range
+--stationary-radius 150     # tolerate larger frame-to-frame movement
+--min-confidence 0.45       # outdoor lighting makes scores dip

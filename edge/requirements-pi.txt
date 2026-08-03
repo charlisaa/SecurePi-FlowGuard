@@ -1,0 +1,38 @@
+# SecurePi — Raspberry Pi EDGE RUNTIME dependencies (IMX500 camera).
+#
+# This is the ONLY environment that runs on the Pi. It must stay lightweight:
+# it loads a pre-compiled .rpk and reads detections off the sensor. It must NOT
+# contain any training / export / compilation libraries (no PyTorch, no
+# Ultralytics, no ONNX, no FiftyOne, no imx500-converter) — those belong in
+# training/requirements-training.txt and run off-device.
+#
+# -------------------------------------------------------------------------
+# RECOMMENDED INSTALL — Raspberry Pi OS (Bookworm): use apt, not pip, so the
+# builds match the system libcamera/Qt and the IMX500 firmware/models are set up:
+#
+#   sudo apt update
+#   sudo apt install -y python3-picamera2 python3-opencv imx500-all
+#
+#   # picamera2  -> Pi camera stack (aarch64/armv7l only; not installable via pip)
+#   # opencv     -> preview window + JPEG snapshot writing
+#   # imx500-all -> sensor firmware + stock models under /usr/share/imx500-models/
+# -------------------------------------------------------------------------
+#
+# The pinned entries below are for reference / non-apt or virtualenv setups
+# only. numpy comes transitively with opencv/picamera2; it is listed so a
+# from-scratch venv still resolves.
+
+opencv-python>=4.5
+numpy>=1.21
+picamera2>=0.3 ; platform_machine == "aarch64" or platform_machine == "armv7l"
+
+# FlowGuard cloud integration is stdlib-only (urllib) — NO extra dependency for
+# edge/flowguard_api.py or the securePi.py callbacks.
+#
+# pyserial is required ONLY for the PIR/ultrasonic sensor bridge
+# (edge/sensor_bridge.py, which reads the Arduino's JSON serial lines). securePi.py
+# itself does not need it. On Raspberry Pi OS: sudo apt install python3-serial.
+pyserial>=3.5
+
+# Optional: to run the off-device edge tests (edge/tests/), also install pytest.
+# pytest>=7

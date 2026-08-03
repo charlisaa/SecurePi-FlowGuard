@@ -1,0 +1,57 @@
+# SecurePi (FlowGuard) — PIR/ultrasonic SENSOR BRIDGE systemd TEMPLATE.
+#
+# This is a SEPARATE, optional service from securepi.service. It runs
+# edge/sensor_bridge.py, which reads the Arduino's JSON serial lines and raises
+# RESTRICTED_MOTION events during restricted hours. It owns ONLY the serial port
+# (never the IMX500 camera), so it is safe to run alongside securepi.service.
+#
+# It intentionally hardcodes NO username, NO absolute path, and NO secrets — all
+# come from the SAME EnvironmentFile as securepi.service (securepi.env.example).
+#
+# ---------------------------------------------------------------------------
+# INSTALL
+#   1. Ensure /etc/securepi/securepi.env exists (see securepi.service step 2) and
+#      sets SENSOR_BRIDGE_ENABLED=true plus the SENSOR_* / RESTRICTED_* / FLOWGUARD_*
+#      variables. Keep it root-owned, mode 0600 (it holds EDGE_INGEST_TOKEN).
+#   2. The run-user must be in the "dialout" group to read the serial port:
+#        sudo usermod -aG dialout <RUN_USER>
+#   3. Install and start:
+#        sudo cp deploy/securepi-sensor-bridge.service /etc/systemd/system/
+#        sudo nano /etc/systemd/system/securepi-sensor-bridge.service   # set User=/Group=
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable --now securepi-sensor-bridge.service
+#        journalctl -u securepi-sensor-bridge.service -f
+# ---------------------------------------------------------------------------
+
+[Unit]
+Description=SecurePi FlowGuard PIR/ultrasonic sensor bridge (restricted-zone motion)
+After=multi-user.target
+
+[Service]
+Type=simple
+
+# Run as an ordinary user, NOT root. The user must be in the "dialout" group so
+# it can read the Arduino serial device. Replace both placeholders.
+User=<RUN_USER>
+Group=<RUN_GROUP>
+SupplementaryGroups=dialout
+
+# Shared environment file (SENSOR_* / RESTRICTED_* / FLOWGUARD_* / EDGE_INGEST_TOKEN).
+# The leading '-' means "don't fail if it's missing", but you should create it.
+EnvironmentFile=-/etc/securepi/securepi.env
+
+WorkingDirectory=${SECUREPI_INSTALL_DIR}
+
+# The bridge reads every setting from the environment above (--enabled defaults
+# from SENSOR_BRIDGE_ENABLED). No secret is ever written into this unit.
+ExecStart=/usr/bin/python3 ${SECUREPI_INSTALL_DIR}/edge/sensor_bridge.py
+
+# systemctl stop sends SIGTERM; the bridge exits cleanly. Restart transient
+# failures (e.g. a briefly unplugged serial device).
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

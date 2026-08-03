@@ -1,0 +1,71 @@
+# SecurePi (FlowGuard) — systemd service TEMPLATE for headless operation.
+#
+# This is a template: replace the <PLACEHOLDERS> below, then install it.
+# It intentionally hardcodes NO username, NO absolute install path, and NO
+# secrets — all of those come from the EnvironmentFile (see securepi.env.example).
+#
+# ---------------------------------------------------------------------------
+# INSTALL
+#   1. Copy the repo onto the Pi, e.g. /home/<user>/SecurePi_FlowGuard
+#   2. Create the environment file and edit it:
+#        sudo mkdir -p /etc/securepi
+#        sudo cp deploy/securepi.env.example /etc/securepi/securepi.env
+#        sudo nano /etc/securepi/securepi.env      # set INSTALL_DIR, PRESET, MODEL...
+#   3. Replace <RUN_USER>/<RUN_GROUP> below with a NON-root user that is a member
+#      of the "video" group (needed for the camera). Do NOT run as root.
+#        sudo usermod -aG video <RUN_USER>
+#   4. Install and start:
+#        sudo cp deploy/securepi.service /etc/systemd/system/securepi.service
+#        sudo nano /etc/systemd/system/securepi.service   # set User=/Group=
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable --now securepi.service
+#        journalctl -u securepi.service -f
+# ---------------------------------------------------------------------------
+
+[Unit]
+Description=SecurePi FlowGuard edge monitor (IMX500)
+After=multi-user.target
+
+[Service]
+Type=simple
+
+# Run as an ordinary user, NOT root. The user must be in the "video" group so
+# libcamera/picamera2 can open the sensor. Replace both placeholders.
+User=<RUN_USER>
+Group=<RUN_GROUP>
+SupplementaryGroups=video render
+
+# All tunables come from here (KEY=VALUE lines). The leading '-' means "don't
+# fail if the file is missing", but you should create it (see step 2 above).
+# This is also where the FlowGuard cloud integration is configured
+# (FLOWGUARD_EDGE_ENABLED, FLOWGUARD_API_URL, EDGE_INGEST_TOKEN, SECUREPI_DEVICE_ID,
+# SECUREPI_CAMERA_LOCATION, SECUREPI_OUTBOX_DIR). securePi.py reads these env vars
+# directly as CLI defaults, so NO secret is ever written into this unit file.
+# Keep /etc/securepi/securepi.env root-owned and mode 0600.
+EnvironmentFile=-/etc/securepi/securepi.env
+
+# WorkingDirectory and the script path are taken from the env file so no path
+# is hardcoded in this unit.
+WorkingDirectory=${SECUREPI_INSTALL_DIR}
+
+# Headless run. Preset + model/labels/runtime dir are supplied via the env file.
+# $SECUREPI_EXTRA_ARGS (unquoted, word-split) lets you append flags without
+# editing this unit. Using @<preset> keeps behaviour identical to a manual run.
+ExecStart=/usr/bin/python3 ${SECUREPI_INSTALL_DIR}/edge/securePi.py \
+    @${SECUREPI_INSTALL_DIR}/edge/presets/${SECUREPI_PRESET} \
+    --headless \
+    --model ${SECUREPI_MODEL} \
+    --labels ${SECUREPI_LABELS} \
+    --runtime-dir ${SECUREPI_RUNTIME_DIR} \
+    $SECUREPI_EXTRA_ARGS
+
+# Restart on failure (systemctl stop sends SIGTERM, which SecurePi handles
+# cleanly and exits 0 — that is NOT a failure and will not trigger a restart).
+Restart=on-failure
+RestartSec=5
+
+# Light hardening. Do not tighten further without testing camera access.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,35 @@
+# SecurePi — TRAINING / EXPORT / COMPILATION dependencies.
+#
+# Runs OFF the Raspberry Pi — on a computer or Google Colab (GPU recommended).
+# Workflow: dataset_prep.py -> train.py -> export_onnx.py -> compile_imx500.py
+# (or run_pipeline.py end-to-end). NONE of this is installed on the Pi.
+#
+# -------------------------------------------------------------------------
+# IMPORTANT: Sony's IMX500 converter requires Python 3.8–3.11 (NOT 3.12+).
+# Use a matching interpreter, e.g.:
+#   conda create -n securepi python=3.10 && conda activate securepi
+#   pip install -r training/requirements-training.txt
+# On Colab, a T4 GPU runtime already ships a compatible Python.
+# -------------------------------------------------------------------------
+
+# --- Training (YOLOv8) ---
+ultralytics>=8.0        # YOLOv8 training + .pt -> .onnx export API
+torch>=2.0              # pulled in by ultralytics; listed explicitly for clarity
+torchvision>=0.15
+
+# --- ONNX export / simplification ---
+onnx>=1.14
+onnxruntime>=1.15
+onnxslim>=0.1           # used by ultralytics `export(..., simplify=True)`
+
+# --- Dataset acquisition & formatting ---
+fiftyone>=0.23          # COCO + Open Images download in dataset_prep.py
+
+# --- IMX500 compilation (.onnx -> .rpk) ---
+# Provides the `imx500-converter` / `imxconv-pt` / `sdspconv` CLI used by
+# compile_imx500.py. Requires Python 3.8–3.11 (see note above).
+imx500-converter[pt]
+
+# numpy is required transitively by torch/ultralytics/onnx; pinned for a clean
+# from-scratch resolve.
+numpy>=1.21

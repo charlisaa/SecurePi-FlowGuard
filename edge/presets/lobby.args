@@ -1,0 +1,9 @@
+# SecurePi — LOBBY preset:  python edge/securePi.py @lobby.args
+# presets/common.args is applied automatically as the base; this file only
+# overrides what differs for this location.
+
+# Busy public area: alert fast, and people pass close to bags all the time,
+# so keep the owner radius tight.
+--zone lobby
+--unattended-time 60
+--proximity 120
