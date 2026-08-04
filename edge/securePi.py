@@ -26,10 +26,16 @@ Settings come from preset files in the presets/ folder (required):
 presets/common.args is applied automatically as the shared base, then the
 named preset's overrides, then any command-line flags.
 
+With ``--stream``, the same single process (and the same single Picamera2
+instance) also serves the annotated frames as an MJPEG HTTP stream
+(``/video_feed``) plus a JSON health endpoint (``/health``) — independent of,
+and in addition to, the FlowGuard cloud alert integration below.
+
 Examples
 --------
     python edge/securePi.py @edge/presets/lobby.args
     python edge/securePi.py @edge/presets/kitchen.args --headless --unattended-time 60
+    python edge/securePi.py @edge/presets/lobby.args --headless --stream --stream-port 8001
     python edge/securePi.py @edge/presets/lobby.args \
         --model models/imx500_custom_securepi.rpk \
         --labels models/labels.txt --headless
@@ -39,13 +45,18 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import logging
 import math
 import os
 import signal
+import socketserver
 import sys
+import threading
 import time
+import urllib.request
 from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Optional, Any
 import concurrent.futures
@@ -66,11 +77,12 @@ except ImportError:  # let --help / imports work off-device
 # monitor still imports and runs fully offline if the integration module is
 # missing — the Pi NEVER calls WhatsApp; it only POSTs events to FlowGuard.
 try:
-    from flowguard_api import FlowGuardApiClient, build_event_id
+    from flowguard_api import FlowGuardApiClient, build_event_id, mask_url
     _FLOWGUARD_AVAILABLE = True
 except ImportError:  # pragma: no cover - integration is optional
     FlowGuardApiClient = None  # type: ignore[assignment]
     build_event_id = None  # type: ignore[assignment]
+    mask_url = None  # type: ignore[assignment]
     _FLOWGUARD_AVAILABLE = False
 
 
@@ -192,6 +204,13 @@ class Config:
                                          # real pest's track keep breaking before it could
                                          # accumulate pest_confirmation_frames/time -- i.e. a
                                          # genuinely present pest could go unconfirmed forever.
+
+    # --- MJPEG streaming (off unless --stream is passed) ------------------
+    stream_enabled: bool = False
+    stream_host: str = "0.0.0.0"
+    stream_port: int = 8001
+    stream_fps: float = 8.0                # annotated frames published per second
+    stream_quality: int = 70               # JPEG quality 1..100
 
     def confidence_for(self, label: str, category_default: float) -> float:
         """Effective confidence threshold for one label: class_confidence override,
@@ -1085,9 +1104,164 @@ class Renderer:
                       thickness=3 if confirmed else 2)
 
 
+class FrameBuffer:
+    """Thread-safe holder for the single latest annotated JPEG frame.
+
+    Only the newest frame is kept — there is no queue, so a slow or stalled
+    client can never build a backlog, and every client always receives the
+    most recent frame the detection loop published.
+    """
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._jpeg: Optional[bytes] = None
+        self._seq = 0                       # bumps on every publish
+        self._published_at: Optional[float] = None  # monotonic
+
+    def publish(self, jpeg: bytes) -> None:
+        with self._cond:
+            self._jpeg = jpeg
+            self._seq += 1
+            self._published_at = time.monotonic()
+            self._cond.notify_all()
+
+    def wait_for_frame(self, last_seq: int,
+                       timeout: float = 1.0) -> tuple[Optional[bytes], int]:
+        """Block until a frame newer than ``last_seq`` arrives.
+
+        Returns ``(jpeg, seq)``; ``jpeg`` is None if the timeout expired first.
+        A client that joins late (``last_seq=0``) gets the current frame at once.
+        """
+        with self._cond:
+            if self._seq == last_seq:
+                self._cond.wait(timeout)
+            if self._seq == last_seq or self._jpeg is None:
+                return None, last_seq
+            return self._jpeg, self._seq
+
+    def age_seconds(self) -> Optional[float]:
+        """Seconds since the last publish, or None if nothing published yet."""
+        with self._cond:
+            if self._published_at is None:
+                return None
+            return max(0.0, time.monotonic() - self._published_at)
+
+
+class _StreamHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True    # in-flight client threads never block process exit
+    allow_reuse_address = True
+
+
+class StreamServer:
+    """Embedded HTTP server exposing /health and the /video_feed MJPEG stream.
+
+    Lives inside the SecurePi process in a background thread and serves only
+    frames the detection loop has already annotated and published to a
+    FrameBuffer. It never touches Picamera2 or the IMX500, so the
+    one-camera-owner rule holds no matter how many clients connect, and a
+    disconnecting client can only ever kill its own handler thread.
+    """
+
+    def __init__(self, config: Config, buffer: FrameBuffer) -> None:
+        self._stop_event = threading.Event()
+        handler = self._make_handler(buffer, self._stop_event)
+        self._httpd = _StreamHTTPServer((config.stream_host, config.stream_port),
+                                        handler)
+        self._thread = threading.Thread(target=self._httpd.serve_forever,
+                                        name="securepi-http", daemon=True)
+
+    @property
+    def port(self) -> int:
+        return self._httpd.server_address[1]
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()      # ends any in-flight /video_feed loops
+        self._httpd.shutdown()
+        self._httpd.server_close()
+        self._thread.join(timeout=5.0)
+
+    @staticmethod
+    def _make_handler(buffer: FrameBuffer, stop_event: threading.Event):
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, fmt: str, *args) -> None:
+                LOGGER.debug("HTTP %s %s", self.address_string(), fmt % args)
+
+            def _common_headers(self) -> None:
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "no-store")
+
+            def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler API)
+                try:
+                    path = self.path.split("?", 1)[0]
+                    if path == "/health":
+                        self._serve_health()
+                    elif path == "/video_feed":
+                        self._serve_video_feed()
+                    else:
+                        self.send_error(404, "Not Found")
+                except OSError:
+                    # Broken pipe / reset: the client went away mid-response.
+                    # Swallow it — a dead browser tab must never disturb the
+                    # detection loop or the other clients.
+                    LOGGER.debug("HTTP client %s disconnected", self.address_string())
+
+            def _serve_health(self) -> None:
+                age = buffer.age_seconds()
+                body = json.dumps({
+                    "status": "online",
+                    "camera": "IMX500",
+                    "streaming": True,
+                    "latest_frame_age_seconds": (round(age, 3)
+                                                 if age is not None else None),
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self._common_headers()
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _serve_video_feed(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type",
+                                 "multipart/x-mixed-replace; boundary=frame")
+                self._common_headers()
+                self.end_headers()
+                seq = 0
+                while not stop_event.is_set():
+                    jpeg, seq = buffer.wait_for_frame(seq, timeout=1.0)
+                    if jpeg is None:
+                        continue    # no new frame yet — keep the socket open
+                    self.wfile.write(b"--frame\r\n"
+                                     b"Content-Type: image/jpeg\r\n")
+                    self.wfile.write(f"Content-Length: {len(jpeg)}\r\n\r\n"
+                                     .encode("ascii"))
+                    self.wfile.write(jpeg)
+                    self.wfile.write(b"\r\n")
+
+        return Handler
+
+
 def _sigterm_exit(signum, frame) -> None:
     """Route SIGTERM (systemctl stop) through the normal cleanup path."""
     raise SystemExit(0)
+
+
+def _check_flowguard_connectivity(client: "FlowGuardApiClient", timeout: float = 3.0) -> None:
+    """One-shot reachability check logged at startup, so it's obvious from the
+    CLI alone whether the configured FlowGuard backend is actually up — not
+    just whether the integration is *enabled*. Best-effort only: never raises,
+    and a failure here doesn't stop the monitor (the outbox will keep retrying)."""
+    label = mask_url(client.api_url) if mask_url else client.api_url
+    try:
+        with urllib.request.urlopen(client.api_url, timeout=timeout) as resp:
+            status = getattr(resp, "status", None) or resp.getcode()
+        LOGGER.info("[FlowGuard] CONNECTED -> %s (HTTP %s)", label, status)
+    except Exception as exc:  # pragma: no cover - defensive; never blocks startup
+        LOGGER.warning("[FlowGuard] NOT REACHABLE -> %s (%s)", label, exc)
 
 
 def run(config: Config, client=None) -> None:
@@ -1101,6 +1275,9 @@ def run(config: Config, client=None) -> None:
     # Flush any events left queued by a previous run (crash / power-loss recovery).
     if client is not None:
         client.start()
+        _check_flowguard_connectivity(client)
+    else:
+        LOGGER.info("[FlowGuard] Disabled (FLOWGUARD_EDGE_ENABLED not set) — running offline.")
 
     picam2 = Picamera2(detector.camera_num)
     controls = {}
@@ -1126,12 +1303,25 @@ def run(config: Config, client=None) -> None:
     person_tracker = PersonTracker(config)
     pest_tracker = PestTracker(config)
     renderer = Renderer(config)
+
+    frame_buffer: Optional[FrameBuffer] = None
+    stream_server: Optional[StreamServer] = None
+    if config.stream_enabled:
+        frame_buffer = FrameBuffer()
+        stream_server = StreamServer(config, frame_buffer)
+        stream_server.start()
+        LOGGER.info("MJPEG stream on http://%s:%d/video_feed (health: /health)",
+                    config.stream_host, stream_server.port)
+    stream_interval = 1.0 / config.stream_fps
+    next_publish = 0.0
+
     LOGGER.info("Security monitor started (%s mode). Press 'q' in the window to quit.",
                 "headless" if config.headless else "preview")
 
     fps = 0.0
     prev = time.monotonic()
     last_flowguard_flush = time.monotonic()
+    last_detection_log = 0.0
 
     try:
         while True:
@@ -1148,6 +1338,13 @@ def run(config: Config, client=None) -> None:
                 # would instantly "expire" every unattended timer.
                 now = time.monotonic()
                 detections = detector.detect(metadata, picam2)
+                # Throttled to ~1/sec so the CLI stays readable at camera frame
+                # rate — visible at the default log level (no -v needed), so a
+                # headless/SSH session can see what the model is seeing live.
+                if detections and now - last_detection_log >= 1.0:
+                    last_detection_log = now
+                    summary = ", ".join(f"{d.label}({d.score:.2f})" for d in detections)
+                    LOGGER.info("Detected: %s", summary)
                 person_dets, bag_dets, pest_dets = split_detections(detections, config)
 
                 # Track people first (for stable ids), then bags (which need those ids
@@ -1168,8 +1365,11 @@ def run(config: Config, client=None) -> None:
                                   if _alert_due(b, config, now)]
                 pest_alerts_due = [p for p in pest_tracker.pests.values()
                                    if _pest_alert_due(p, config, now)]
+                # Publish to the stream at --stream-fps, not at camera rate:
+                # JPEG-encoding every frame would burn CPU no client can use.
+                stream_due = stream_server is not None and now >= next_publish
                 frame = (request.make_array("main")
-                         if not config.headless or bag_alerts_due or pest_alerts_due
+                         if not config.headless or bag_alerts_due or pest_alerts_due or stream_due
                          else None)
             finally:
                 request.release()
@@ -1206,6 +1406,19 @@ def run(config: Config, client=None) -> None:
             for pest in pest_alerts_due:
                 _fire_pest_alert(frame, pest, config, now, renderer, client=client)
 
+            # Publish only after every annotation (including any alert box just
+            # stamped above) is on the frame, so the stream shows exactly what
+            # a snapshot would.
+            if stream_due and frame is not None:
+                ok, jpeg = cv2.imencode(
+                    ".jpg", frame,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), config.stream_quality])
+                if ok:
+                    frame_buffer.publish(jpeg.tobytes())
+                else:
+                    LOGGER.warning("JPEG encode failed; stream frame skipped.")
+                next_publish = now + stream_interval
+
             # Periodically retry the outbox so events queued while Wi-Fi was down get
             # re-sent even when no new alert fires. Non-blocking (runs on the worker).
             if client is not None and (now - last_flowguard_flush) >= client.retry_interval:
@@ -1219,6 +1432,8 @@ def run(config: Config, client=None) -> None:
     except KeyboardInterrupt:
         LOGGER.info("Interrupted by user.")
     finally:
+        if stream_server is not None:
+            stream_server.stop()
         picam2.stop()
         cv2.destroyAllWindows()
         # Stop the FlowGuard background worker cleanly; unsent events remain safely
@@ -1398,6 +1613,21 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--alert-cooldown", type=float, default=d.alert_cooldown_sec,
                    help="Seconds between repeat alerts for the same bag "
                         "(default: %(default)s).")
+    # --- MJPEG streaming (independent of the FlowGuard cloud integration) ---
+    p.add_argument("--stream", action="store_true",
+                   help="Serve the annotated frames as an MJPEG HTTP stream from "
+                        "inside this process (endpoints: /video_feed, /health). "
+                        "Off by default.")
+    p.add_argument("--stream-host", default=d.stream_host,
+                   help="Interface the stream server binds to (default: %(default)s).")
+    p.add_argument("--stream-port", type=int, default=d.stream_port,
+                   help="Port for the stream server (default: %(default)s).")
+    p.add_argument("--stream-fps", type=float, default=d.stream_fps,
+                   help="Annotated frames published to the stream per second "
+                        "(default: %(default)s). Detection always runs at full "
+                        "camera rate regardless.")
+    p.add_argument("--stream-quality", type=int, default=d.stream_quality,
+                   help="JPEG quality for streamed frames, 1-100 (default: %(default)s).")
     # --- FlowGuard cloud integration (edge -> backend edge-ingest endpoint) ---
     # The Pi NEVER calls WhatsApp directly — it only POSTs events to FlowGuard.
     # The ingest token is read from the EDGE_INGEST_TOKEN env var ONLY (never a CLI
@@ -1431,6 +1661,12 @@ def parse_args(argv=None) -> argparse.Namespace:
         expanded = [f"@{base}"] + expanded
     args = p.parse_args(expanded)   # parse first so -h/--help still works
     _require_args_file(p, raw)
+    if args.stream_fps <= 0:
+        p.error("--stream-fps must be greater than 0")
+    if not 1 <= args.stream_quality <= 100:
+        p.error("--stream-quality must be between 1 and 100")
+    if not 0 <= args.stream_port <= 65535:
+        p.error("--stream-port must be between 0 and 65535")
     return args
 
 
@@ -1480,6 +1716,11 @@ def main(argv=None) -> None:
         pest_confirmation_frames=args.pest_confirmation_frames,
         pest_alert_cooldown_sec=args.pest_alert_cooldown,
         pest_match_radius=args.pest_match_radius,
+        stream_enabled=args.stream,
+        stream_host=args.stream_host,
+        stream_port=args.stream_port,
+        stream_fps=args.stream_fps,
+        stream_quality=args.stream_quality,
     )
     client = _build_flowguard_client(args, config)
     run(config, client=client)

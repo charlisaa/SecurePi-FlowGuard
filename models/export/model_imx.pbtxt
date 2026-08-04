@@ -28,7 +28,7 @@ layer {
     "QuantizeBits": 16
     "ConstInputs": "/model/mul/WeightsPOTQuantizer:0"
     "RuntimeMemory": "4.13KB"
-    "ScheduleId": "381"
+    "ScheduleId": "383"
 
   }
   blobs {
@@ -50,7 +50,7 @@ layer {
     "QuantizeBits": 16
     "ConstInputs": "/model/sub/WeightsPOTQuantizer:0"
     "RuntimeMemory": "8.25KB"
-    "ScheduleId": "375"
+    "ScheduleId": "377"
 
   }
   blobs {
@@ -72,7 +72,7 @@ layer {
     "QuantizeBits": 16
     "ConstInputs": "/model/add_6/WeightsPOTQuantizer:0"
     "RuntimeMemory": "8.25KB"
-    "ScheduleId": "378"
+    "ScheduleId": "380"
 
   }
   blobs {
@@ -2254,7 +2254,7 @@ layer {
     scale_param {
     "InputShapes": "64x20x20"
     "OutputShape": "64x20x20"
-    "Quantize[mn,mx]": [-8.0, 8.0]
+    "Quantize[mn,mx]": [-4.0, 4.0]
     "QuantizeBits": 8
     "ConstInputs": "/model/model_6_m_0_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_6_m_0_cv2_conv.layer.bias.uid18:0"
@@ -2781,7 +2781,7 @@ layer {
     scale_param {
     "InputShapes": "128x12x12, 128x128x3x3, 128"
     "OutputShape": "128x10x10"
-    "Quantize[mn,mx]": [-8.0, 8.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 16
     "ConstInputs": "/model/model_8_m_0_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_8_m_0_cv2_conv.layer.bias.uid25:0"
@@ -2811,7 +2811,7 @@ layer {
     scale_param {
     "InputShapes": "128x10x10"
     "OutputShape": "128x10x10"
-    "Quantize[mn,mx]": [-8.0, 8.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     "ConstInputs": "/model/model_8_m_0_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_8_m_0_cv2_conv.layer.bias.uid25:0"
@@ -2829,7 +2829,7 @@ layer {
     scale_param {
     "InputShapes": "128x10x10, 128x10x10"
     "OutputShape": "128x10x10"
-    "Quantize[mn,mx]": [-8.0, 8.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     
     "RuntimeMemory": "12.50KB"
@@ -2839,9 +2839,26 @@ layer {
 
 }
 layer {
+  name: "Cast: Cast_to_/model/Concat_7_2"
+  type: "Cast"
+  bottom: "/model/Add_11:0"
+  top: "Cast_to_/model/Concat_7_2:0"
+    scale_param {
+    "InputShapes": "128x10x10"
+    "OutputShape": "128x10x10"
+    "Quantize[mn,mx]": [-8.0, 8.0]
+    "QuantizeBits": 8
+    
+    "RuntimeMemory": "12.50KB"
+    "ScheduleId": "250"
+
+  }
+
+}
+layer {
   name: "Concat: /model/Concat_7"
   type: "Concat"
-  bottom: "/model/Add_11:0"
+  bottom: "Cast_to_/model/Concat_7_2:0"
   bottom: "transform-42-/model/Split_3sts0:0"
   bottom: "transform-43-/model/Split_3sts1:0"
   top: "/model/Concat_7:0"
@@ -2852,7 +2869,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "37.50KB"
-    "ScheduleId": "250"
+    "ScheduleId": "251"
 
   }
 
@@ -2870,7 +2887,7 @@ layer {
     "ConstInputs": "/model/model_8_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_8_cv2_conv.layer.bias.uid26:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "251"
+    "ScheduleId": "252"
 
   }
   blobs {
@@ -2917,7 +2934,7 @@ layer {
     "ConstInputs": "/model/model_9_cv1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_9_cv1_conv.layer.bias.uid27:0"
     "RuntimeMemory": "12.50KB"
-    "ScheduleId": "252"
+    "ScheduleId": "253"
 
   }
   blobs {
@@ -2946,7 +2963,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "12.50KB"
-    "ScheduleId": "253"
+    "ScheduleId": "254"
 
   }
 
@@ -2963,7 +2980,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "12.50KB"
-    "ScheduleId": "254"
+    "ScheduleId": "255"
 
   }
 
@@ -2980,7 +2997,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "12.50KB"
-    "ScheduleId": "255"
+    "ScheduleId": "256"
 
   }
 
@@ -3000,7 +3017,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "256"
+    "ScheduleId": "257"
 
   }
 
@@ -3018,7 +3035,7 @@ layer {
     "ConstInputs": "/model/model_9_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_9_cv2_conv.layer.bias.uid28:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "257"
+    "ScheduleId": "258"
 
   }
   blobs {
@@ -3065,7 +3082,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "100.00KB"
-    "ScheduleId": "258"
+    "ScheduleId": "259"
 
   }
 
@@ -3083,7 +3100,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "150.00KB"
-    "ScheduleId": "259"
+    "ScheduleId": "260"
 
   }
 
@@ -3101,7 +3118,7 @@ layer {
     "ConstInputs": "/model/model_12_cv1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_12_cv1_conv.layer.bias.uid29:0"
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "260"
+    "ScheduleId": "261"
 
   }
   blobs {
@@ -3147,7 +3164,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "80.00KB"
-    "ScheduleId": "261"
+    "ScheduleId": "262"
 
   }
 
@@ -3164,7 +3181,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "80.00KB"
-    "ScheduleId": "264"
+    "ScheduleId": "265"
 
   }
 
@@ -3181,7 +3198,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "40.00KB"
-    "ScheduleId": "262"
+    "ScheduleId": "263"
 
   }
 
@@ -3198,7 +3215,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "40.00KB"
-    "ScheduleId": "265"
+    "ScheduleId": "266"
 
   }
 
@@ -3215,7 +3232,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "263"
+    "ScheduleId": "264"
 
   }
 
@@ -3232,7 +3249,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "266"
+    "ScheduleId": "267"
 
   }
 
@@ -3249,7 +3266,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "267"
+    "ScheduleId": "268"
 
   }
 
@@ -3267,7 +3284,7 @@ layer {
     "ConstInputs": "/model/model_12_m_0_cv1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_12_m_0_cv1_conv.layer.bias.uid30:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "268"
+    "ScheduleId": "269"
 
   }
   blobs {
@@ -3314,7 +3331,7 @@ layer {
     "ConstInputs": "/model/model_12_m_0_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_12_m_0_cv2_conv.layer.bias.uid31:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "269"
+    "ScheduleId": "270"
 
   }
   blobs {
@@ -3360,7 +3377,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "270"
+    "ScheduleId": "271"
 
   }
 
@@ -3379,7 +3396,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "75.00KB"
-    "ScheduleId": "271"
+    "ScheduleId": "272"
 
   }
 
@@ -3397,7 +3414,7 @@ layer {
     "ConstInputs": "/model/model_12_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_12_cv2_conv.layer.bias.uid32:0"
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "272"
+    "ScheduleId": "273"
 
   }
   blobs {
@@ -3444,7 +3461,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "200.00KB"
-    "ScheduleId": "273"
+    "ScheduleId": "274"
 
   }
 
@@ -3462,7 +3479,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "300.00KB"
-    "ScheduleId": "274"
+    "ScheduleId": "275"
 
   }
 
@@ -3480,7 +3497,7 @@ layer {
     "ConstInputs": "/model/model_15_cv1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_15_cv1_conv.layer.bias.uid33:0"
     "RuntimeMemory": "100.00KB"
-    "ScheduleId": "275"
+    "ScheduleId": "276"
 
   }
   blobs {
@@ -3526,7 +3543,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "160.00KB"
-    "ScheduleId": "276"
+    "ScheduleId": "277"
 
   }
 
@@ -3543,7 +3560,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "160.00KB"
-    "ScheduleId": "279"
+    "ScheduleId": "280"
 
   }
 
@@ -3560,7 +3577,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "80.00KB"
-    "ScheduleId": "277"
+    "ScheduleId": "278"
 
   }
 
@@ -3577,7 +3594,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "80.00KB"
-    "ScheduleId": "280"
+    "ScheduleId": "281"
 
   }
 
@@ -3594,7 +3611,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "278"
+    "ScheduleId": "279"
 
   }
 
@@ -3611,7 +3628,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "281"
+    "ScheduleId": "282"
 
   }
 
@@ -3628,7 +3645,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "282"
+    "ScheduleId": "283"
 
   }
 
@@ -3646,7 +3663,7 @@ layer {
     "ConstInputs": "/model/model_15_m_0_cv1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_15_m_0_cv1_conv.layer.bias.uid34:0"
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "283"
+    "ScheduleId": "284"
 
   }
   blobs {
@@ -3693,7 +3710,7 @@ layer {
     "ConstInputs": "/model/model_15_m_0_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_15_m_0_cv2_conv.layer.bias.uid35:0"
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "284"
+    "ScheduleId": "285"
 
   }
   blobs {
@@ -3741,7 +3758,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "150.00KB"
-    "ScheduleId": "285"
+    "ScheduleId": "286"
 
   }
 
@@ -3759,7 +3776,7 @@ layer {
     "ConstInputs": "/model/model_15_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_15_cv2_conv.layer.bias.uid36:0"
     "RuntimeMemory": "100.00KB"
-    "ScheduleId": "286"
+    "ScheduleId": "287"
 
   }
   blobs {
@@ -3806,7 +3823,7 @@ layer {
     "ConstInputs": "/model/model_22_cv3_0_0_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv3_0_0_conv.layer.bias.uid39:0"
     "RuntimeMemory": "100.00KB"
-    "ScheduleId": "290"
+    "ScheduleId": "291"
 
   }
   blobs {
@@ -3853,7 +3870,7 @@ layer {
     "ConstInputs": "/model/model_22_cv2_0_0_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv2_0_0_conv.layer.bias.uid38:0"
     "RuntimeMemory": "100.00KB"
-    "ScheduleId": "288"
+    "ScheduleId": "289"
 
   }
   blobs {
@@ -3900,7 +3917,7 @@ layer {
     "ConstInputs": "/model/model_16_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_16_conv.layer.bias.uid37:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "287"
+    "ScheduleId": "288"
 
   }
   blobs {
@@ -3947,7 +3964,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "105.00KB"
-    "ScheduleId": "291"
+    "ScheduleId": "292"
 
   }
 
@@ -3965,7 +3982,7 @@ layer {
     "ConstInputs": "/model/model_22_cv2_0_1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv2_0_1_conv.layer.bias.uid40:0"
     "RuntimeMemory": "100.00KB"
-    "ScheduleId": "289"
+    "ScheduleId": "290"
 
   }
   blobs {
@@ -4011,7 +4028,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "296"
+    "ScheduleId": "297"
 
   }
 
@@ -4029,7 +4046,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "110.25KB"
-    "ScheduleId": "292"
+    "ScheduleId": "293"
 
   }
 
@@ -4047,7 +4064,7 @@ layer {
     "ConstInputs": "/model/model_22_cv2_0_2/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv2_0_2.layer.bias.uid43:0"
     "RuntimeMemory": "100.00KB"
-    "ScheduleId": "294"
+    "ScheduleId": "295"
 
   }
   blobs {
@@ -4077,7 +4094,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "75.00KB"
-    "ScheduleId": "297"
+    "ScheduleId": "298"
 
   }
 
@@ -4095,7 +4112,7 @@ layer {
     "ConstInputs": "/model/model_22_cv3_0_1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv3_0_1_conv.layer.bias.uid42:0"
     "RuntimeMemory": "100.00KB"
-    "ScheduleId": "293"
+    "ScheduleId": "294"
 
   }
   blobs {
@@ -4141,7 +4158,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "100.00KB"
-    "ScheduleId": "301"
+    "ScheduleId": "302"
 
   }
 
@@ -4159,7 +4176,7 @@ layer {
     "ConstInputs": "/model/model_18_cv1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_18_cv1_conv.layer.bias.uid41:0"
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "298"
+    "ScheduleId": "299"
 
   }
   blobs {
@@ -4201,12 +4218,12 @@ layer {
     scale_param {
     "InputShapes": "64x40x40, 6x64x1x1, 6"
     "OutputShape": "6x40x40"
-    "Quantize[mn,mx]": [-32.0, 32.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     "ConstInputs": "/model/model_22_cv3_0_2/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv3_0_2.layer.bias.uid45:0"
     "RuntimeMemory": "15.00KB"
-    "ScheduleId": "295"
+    "ScheduleId": "296"
 
   }
   blobs {
@@ -4236,7 +4253,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "100.00KB"
-    "ScheduleId": "302"
+    "ScheduleId": "303"
 
   }
 
@@ -4253,7 +4270,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "80.00KB"
-    "ScheduleId": "303"
+    "ScheduleId": "304"
 
   }
 
@@ -4270,7 +4287,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "80.00KB"
-    "ScheduleId": "306"
+    "ScheduleId": "307"
 
   }
 
@@ -4283,11 +4300,11 @@ layer {
     scale_param {
     "InputShapes": "6x40x40"
     "OutputShape": "6x40x40"
-    "Quantize[mn,mx]": [-32.0, 32.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "299"
+    "ScheduleId": "300"
 
   }
 
@@ -4304,7 +4321,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "40.00KB"
-    "ScheduleId": "304"
+    "ScheduleId": "305"
 
   }
 
@@ -4321,7 +4338,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "40.00KB"
-    "ScheduleId": "307"
+    "ScheduleId": "308"
 
   }
 
@@ -4334,12 +4351,12 @@ layer {
     scale_param {
     "InputShapes": "6x40x40"
     "OutputShape": "6x1600"
-    "Quantize[mn,mx]": [-32.0, 32.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     "HasScratch": "true"
     
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "300"
+    "ScheduleId": "301"
 
   }
 
@@ -4356,7 +4373,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "305"
+    "ScheduleId": "306"
 
   }
 
@@ -4373,7 +4390,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "308"
+    "ScheduleId": "309"
 
   }
 
@@ -4390,7 +4407,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "309"
+    "ScheduleId": "310"
 
   }
 
@@ -4403,11 +4420,11 @@ layer {
     scale_param {
     "InputShapes": "6x1600"
     "OutputShape": "6x1600"
-    "Quantize[mn,mx]": [-32.0, 32.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     
     "RuntimeMemory": "9.38KB"
-    "ScheduleId": "387"
+    "ScheduleId": "389"
 
   }
 
@@ -4425,7 +4442,7 @@ layer {
     "ConstInputs": "/model/model_18_m_0_cv1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_18_m_0_cv1_conv.layer.bias.uid44:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "310"
+    "ScheduleId": "311"
 
   }
   blobs {
@@ -4472,7 +4489,7 @@ layer {
     "ConstInputs": "/model/model_18_m_0_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_18_m_0_cv2_conv.layer.bias.uid46:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "311"
+    "ScheduleId": "312"
 
   }
   blobs {
@@ -4520,7 +4537,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "75.00KB"
-    "ScheduleId": "312"
+    "ScheduleId": "313"
 
   }
 
@@ -4538,7 +4555,7 @@ layer {
     "ConstInputs": "/model/model_18_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_18_cv2_conv.layer.bias.uid47:0"
     "RuntimeMemory": "50.00KB"
-    "ScheduleId": "313"
+    "ScheduleId": "314"
 
   }
   blobs {
@@ -4585,7 +4602,7 @@ layer {
     "ConstInputs": "/model/model_22_cv3_1_0_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv3_1_0_conv.layer.bias.uid50:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "316"
+    "ScheduleId": "317"
 
   }
   blobs {
@@ -4632,7 +4649,7 @@ layer {
     "ConstInputs": "/model/model_22_cv2_1_0_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv2_1_0_conv.layer.bias.uid49:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "315"
+    "ScheduleId": "316"
 
   }
   blobs {
@@ -4679,7 +4696,7 @@ layer {
     "ConstInputs": "/model/model_19_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_19_conv.layer.bias.uid48:0"
     "RuntimeMemory": "12.50KB"
-    "ScheduleId": "314"
+    "ScheduleId": "315"
 
   }
   blobs {
@@ -4726,7 +4743,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "27.50KB"
-    "ScheduleId": "320"
+    "ScheduleId": "323"
 
   }
 
@@ -4744,24 +4761,25 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "27.50KB"
-    "ScheduleId": "317"
+    "ScheduleId": "320"
 
   }
 
 }
 layer {
-  name: "Cast: Cast_to_/model/Concat_16_0"
-  type: "Cast"
+  name: "Concat: /model/Concat_16"
+  type: "Concat"
+  bottom: "/model/model_0_act_25/Mul_smr:0"
   bottom: "/model/model_0_act_39/Mul_smr:0"
-  top: "Cast_to_/model/Concat_16_0:0"
+  top: "/model/Concat_16:0"
     scale_param {
-    "InputShapes": "128x10x10"
-    "OutputShape": "128x10x10"
-    "Quantize[mn,mx]": [-4.0, 4.0]
+    "InputShapes": "128x10x10, 256x10x10"
+    "OutputShape": "384x10x10"
+    "Quantize[mn,mx]": [-8.0, 8.0]
     "QuantizeBits": 8
     
-    "RuntimeMemory": "12.50KB"
-    "ScheduleId": "325"
+    "RuntimeMemory": "37.50KB"
+    "ScheduleId": "318"
 
   }
 
@@ -4779,7 +4797,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "30.25KB"
-    "ScheduleId": "321"
+    "ScheduleId": "324"
 
   }
 
@@ -4797,26 +4815,55 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "30.25KB"
-    "ScheduleId": "318"
+    "ScheduleId": "321"
 
   }
 
 }
 layer {
-  name: "Concat: /model/Concat_16"
-  type: "Concat"
-  bottom: "/model/model_0_act_25/Mul_smr:0"
-  bottom: "Cast_to_/model/Concat_16_0:0"
-  top: "/model/Concat_16:0"
+  name: "Conv2D: /model/model_21_cv1_conv/layer/Conv"
+  type: "Convolution"
+  bottom: "/model/Concat_16:0"
+  top: "/model/model_0_act_40/Mul_smr:0"
     scale_param {
-    "InputShapes": "128x10x10, 256x10x10"
-    "OutputShape": "384x10x10"
-    "Quantize[mn,mx]": [-4.0, 4.0]
-    "QuantizeBits": 8
-    
-    "RuntimeMemory": "37.50KB"
-    "ScheduleId": "326"
+    "InputShapes": "384x10x10, 256x384x1x1, 256"
+    "OutputShape": "256x10x10"
+    "Quantize[mn,mx]": [-8.0, 8.0]
+    "QuantizeBits": 16
+    "ConstInputs": "/model/model_21_cv1_conv/WeightsSymmetricQuantizer:0"
+    "ConstInputs": "Variable.model.model_21_cv1_conv.layer.bias.uid51:0"
+    "RuntimeMemory": "25.00KB"
+    "ScheduleId": "319"
 
+  }
+  blobs {
+    shape {
+      dim: 256
+      dim: 384
+      dim: 1
+      dim: 1
+    }
+  }
+  blobs {
+    shape {
+      dim: 256
+    }
+  }
+}
+layer {
+  name: "Swish: /model/model_0_act_40/Mul_smr"
+  type: "Swish"
+  bottom: "/model/model_0_act_40/Mul_smr:0"
+  top: "/model/model_0_act_40/Mul_smr:0"
+    scale_param {
+    "InputShapes": "256x10x10"
+    "OutputShape": "256x10x10"
+    "Quantize[mn,mx]": [-8.0, 8.0]
+    "QuantizeBits": 8
+    "ConstInputs": "/model/model_21_cv1_conv/WeightsSymmetricQuantizer:0"
+    "ConstInputs": "Variable.model.model_21_cv1_conv.layer.bias.uid51:0"
+    "RuntimeMemory": "25.00KB"
+    
   }
 
 }
@@ -4833,7 +4880,7 @@ layer {
     "ConstInputs": "/model/model_22_cv3_1_1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv3_1_1_conv.layer.bias.uid53:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "322"
+    "ScheduleId": "325"
 
   }
   blobs {
@@ -4880,7 +4927,7 @@ layer {
     "ConstInputs": "/model/model_22_cv2_1_1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv2_1_1_conv.layer.bias.uid52:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "319"
+    "ScheduleId": "322"
 
   }
   blobs {
@@ -4915,49 +4962,36 @@ layer {
 
 }
 layer {
-  name: "Conv2D: /model/model_21_cv1_conv/layer/Conv"
-  type: "Convolution"
-  bottom: "/model/Concat_16:0"
-  top: "/model/model_0_act_40/Mul_smr:0"
-    scale_param {
-    "InputShapes": "384x10x10, 256x384x1x1, 256"
-    "OutputShape": "256x10x10"
-    "Quantize[mn,mx]": [-8.0, 8.0]
-    "QuantizeBits": 16
-    "ConstInputs": "/model/model_21_cv1_conv/WeightsSymmetricQuantizer:0"
-    "ConstInputs": "Variable.model.model_21_cv1_conv.layer.bias.uid51:0"
-    "RuntimeMemory": "25.00KB"
-    "ScheduleId": "327"
-
-  }
-  blobs {
-    shape {
-      dim: 256
-      dim: 384
-      dim: 1
-      dim: 1
-    }
-  }
-  blobs {
-    shape {
-      dim: 256
-    }
-  }
-}
-layer {
-  name: "Swish: /model/model_0_act_40/Mul_smr"
-  type: "Swish"
+  name: "Transform: transform-25-(F)/model/model_21_cv1_conv/layer/Conv"
+  type: "Transform"
   bottom: "/model/model_0_act_40/Mul_smr:0"
-  top: "/model/model_0_act_40/Mul_smr:0"
+  top: "transform-25-(F)/model/model_21_cv1_conv/layer/Conv:0"
     scale_param {
     "InputShapes": "256x10x10"
     "OutputShape": "256x10x10"
     "Quantize[mn,mx]": [-8.0, 8.0]
     "QuantizeBits": 8
-    "ConstInputs": "/model/model_21_cv1_conv/WeightsSymmetricQuantizer:0"
-    "ConstInputs": "Variable.model.model_21_cv1_conv.layer.bias.uid51:0"
-    "RuntimeMemory": "25.00KB"
     
+    "RuntimeMemory": "80.00KB"
+    "ScheduleId": "333"
+
+  }
+
+}
+layer {
+  name: "Transform: transform-26-(F)/model/model_21_cv1_conv/layer/Conv"
+  type: "Transform"
+  bottom: "/model/model_0_act_40/Mul_smr:0"
+  top: "transform-26-(F)/model/model_21_cv1_conv/layer/Conv:0"
+    scale_param {
+    "InputShapes": "256x10x10"
+    "OutputShape": "256x10x10"
+    "Quantize[mn,mx]": [-8.0, 8.0]
+    "QuantizeBits": 8
+    
+    "RuntimeMemory": "80.00KB"
+    "ScheduleId": "336"
+
   }
 
 }
@@ -4974,7 +5008,7 @@ layer {
     "ConstInputs": "/model/model_22_cv3_1_2/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv3_1_2.layer.bias.uid56:0"
     "RuntimeMemory": "3.75KB"
-    "ScheduleId": "324"
+    "ScheduleId": "327"
 
   }
   blobs {
@@ -5004,7 +5038,7 @@ layer {
     "ConstInputs": "/model/model_22_cv2_1_2/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv2_1_2.layer.bias.uid55:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "323"
+    "ScheduleId": "326"
 
   }
   blobs {
@@ -5022,35 +5056,35 @@ layer {
   }
 }
 layer {
-  name: "Transform: transform-25-(F)/model/model_21_cv1_conv/layer/Conv"
-  type: "Transform"
-  bottom: "/model/model_0_act_40/Mul_smr:0"
-  top: "transform-25-(F)/model/model_21_cv1_conv/layer/Conv:0"
+  name: "StrideSlice: /model/Split_7sts0"
+  type: "StrideSlice"
+  bottom: "transform-25-(F)/model/model_21_cv1_conv/layer/Conv:0"
+  top: "/model/Split_7sts0:0"
     scale_param {
     "InputShapes": "256x10x10"
-    "OutputShape": "256x10x10"
+    "OutputShape": "128x10x10"
     "Quantize[mn,mx]": [-8.0, 8.0]
     "QuantizeBits": 8
     
-    "RuntimeMemory": "80.00KB"
-    "ScheduleId": "332"
+    "RuntimeMemory": "40.00KB"
+    "ScheduleId": "334"
 
   }
 
 }
 layer {
-  name: "Transform: transform-26-(F)/model/model_21_cv1_conv/layer/Conv"
-  type: "Transform"
-  bottom: "/model/model_0_act_40/Mul_smr:0"
-  top: "transform-26-(F)/model/model_21_cv1_conv/layer/Conv:0"
+  name: "StrideSlice: /model/Split_7sts1"
+  type: "StrideSlice"
+  bottom: "transform-26-(F)/model/model_21_cv1_conv/layer/Conv:0"
+  top: "/model/Split_7sts1:0"
     scale_param {
     "InputShapes": "256x10x10"
-    "OutputShape": "256x10x10"
+    "OutputShape": "128x10x10"
     "Quantize[mn,mx]": [-8.0, 8.0]
     "QuantizeBits": 8
     
-    "RuntimeMemory": "80.00KB"
-    "ScheduleId": "335"
+    "RuntimeMemory": "40.00KB"
+    "ScheduleId": "337"
 
   }
 
@@ -5084,41 +5118,58 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "330"
+    "ScheduleId": "331"
 
   }
 
 }
 layer {
-  name: "StrideSlice: /model/Split_7sts0"
-  type: "StrideSlice"
-  bottom: "transform-25-(F)/model/model_21_cv1_conv/layer/Conv:0"
-  top: "/model/Split_7sts0:0"
+  name: "Transform: transform-22-/model/Split_7sts0"
+  type: "Transform"
+  bottom: "/model/Split_7sts0:0"
+  top: "transform-22-/model/Split_7sts0:0"
     scale_param {
-    "InputShapes": "256x10x10"
+    "InputShapes": "128x10x10"
     "OutputShape": "128x10x10"
     "Quantize[mn,mx]": [-8.0, 8.0]
     "QuantizeBits": 8
     
-    "RuntimeMemory": "40.00KB"
-    "ScheduleId": "333"
+    "RuntimeMemory": "12.50KB"
+    "ScheduleId": "335"
 
   }
 
 }
 layer {
-  name: "StrideSlice: /model/Split_7sts1"
-  type: "StrideSlice"
-  bottom: "transform-26-(F)/model/model_21_cv1_conv/layer/Conv:0"
-  top: "/model/Split_7sts1:0"
+  name: "Transform: transform-23-/model/Split_7sts1"
+  type: "Transform"
+  bottom: "/model/Split_7sts1:0"
+  top: "transform-23-/model/Split_7sts1:0"
     scale_param {
-    "InputShapes": "256x10x10"
+    "InputShapes": "128x10x10"
     "OutputShape": "128x10x10"
     "Quantize[mn,mx]": [-8.0, 8.0]
     "QuantizeBits": 8
     
-    "RuntimeMemory": "40.00KB"
-    "ScheduleId": "336"
+    "RuntimeMemory": "12.50KB"
+    "ScheduleId": "338"
+
+  }
+
+}
+layer {
+  name: "Transform: transform-24-/model/Split_7sts1"
+  type: "Transform"
+  bottom: "/model/Split_7sts1:0"
+  top: "transform-24-/model/Split_7sts1:0"
+    scale_param {
+    "InputShapes": "128x10x10"
+    "OutputShape": "128x10x10"
+    "Quantize[mn,mx]": [-8.0, 8.0]
+    "QuantizeBits": 8
+    
+    "RuntimeMemory": "12.50KB"
+    "ScheduleId": "339"
 
   }
 
@@ -5154,75 +5205,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "26.00KB"
-    "ScheduleId": "331"
-
-  }
-
-}
-layer {
-  name: "Transform: transform-22-/model/Split_7sts0"
-  type: "Transform"
-  bottom: "/model/Split_7sts0:0"
-  top: "transform-22-/model/Split_7sts0:0"
-    scale_param {
-    "InputShapes": "128x10x10"
-    "OutputShape": "128x10x10"
-    "Quantize[mn,mx]": [-8.0, 8.0]
-    "QuantizeBits": 8
-    
-    "RuntimeMemory": "12.50KB"
-    "ScheduleId": "334"
-
-  }
-
-}
-layer {
-  name: "Transform: transform-23-/model/Split_7sts1"
-  type: "Transform"
-  bottom: "/model/Split_7sts1:0"
-  top: "transform-23-/model/Split_7sts1:0"
-    scale_param {
-    "InputShapes": "128x10x10"
-    "OutputShape": "128x10x10"
-    "Quantize[mn,mx]": [-8.0, 8.0]
-    "QuantizeBits": 8
-    
-    "RuntimeMemory": "12.50KB"
-    "ScheduleId": "337"
-
-  }
-
-}
-layer {
-  name: "Transform: transform-24-/model/Split_7sts1"
-  type: "Transform"
-  bottom: "/model/Split_7sts1:0"
-  top: "transform-24-/model/Split_7sts1:0"
-    scale_param {
-    "InputShapes": "128x10x10"
-    "OutputShape": "128x10x10"
-    "Quantize[mn,mx]": [-8.0, 8.0]
-    "QuantizeBits": 8
-    
-    "RuntimeMemory": "12.50KB"
-    "ScheduleId": "338"
-
-  }
-
-}
-layer {
-  name: "Transform: transform-7-/model/Reshape_17"
-  type: "Transform"
-  bottom: "/model/Reshape_17:0"
-  top: "transform-7-/model/Reshape_17:0"
-    scale_param {
-    "InputShapes": "6x400"
-    "OutputShape": "6x400"
-    "Quantize[mn,mx]": [-32.0, 32.0]
-    "QuantizeBits": 8
-    
-    "RuntimeMemory": "2.44KB"
-    "ScheduleId": "388"
+    "ScheduleId": "332"
 
   }
 
@@ -5240,7 +5223,7 @@ layer {
     "ConstInputs": "/model/model_21_m_0_cv1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_21_m_0_cv1_conv.layer.bias.uid54:0"
     "RuntimeMemory": "12.50KB"
-    "ScheduleId": "339"
+    "ScheduleId": "340"
 
   }
   blobs {
@@ -5275,6 +5258,23 @@ layer {
 
 }
 layer {
+  name: "Cast: Cast_to_/model/Concat_24_1"
+  type: "Cast"
+  bottom: "/model/Reshape_17:0"
+  top: "Cast_to_/model/Concat_24_1:0"
+    scale_param {
+    "InputShapes": "6x400"
+    "OutputShape": "6x400"
+    "Quantize[mn,mx]": [-16.0, 16.0]
+    "QuantizeBits": 8
+    
+    "RuntimeMemory": "12.50KB"
+    "ScheduleId": "330"
+
+  }
+
+}
+layer {
   name: "Pad: /model/Pad_7_to1d_0"
   type: "Pad"
   bottom: "/model/model_0_act_41/Mul_smr:0"
@@ -5287,7 +5287,24 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "15.00KB"
-    "ScheduleId": "340"
+    "ScheduleId": "341"
+
+  }
+
+}
+layer {
+  name: "Transform: transform-7-Cast_to_/model/Concat_24_1"
+  type: "Transform"
+  bottom: "Cast_to_/model/Concat_24_1:0"
+  top: "transform-7-Cast_to_/model/Concat_24_1:0"
+    scale_param {
+    "InputShapes": "6x400"
+    "OutputShape": "6x400"
+    "Quantize[mn,mx]": [-16.0, 16.0]
+    "QuantizeBits": 8
+    
+    "RuntimeMemory": "2.44KB"
+    "ScheduleId": "390"
 
   }
 
@@ -5305,7 +5322,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "18.00KB"
-    "ScheduleId": "341"
+    "ScheduleId": "342"
 
   }
 
@@ -5318,12 +5335,12 @@ layer {
     scale_param {
     "InputShapes": "128x12x12, 128x128x3x3, 128"
     "OutputShape": "128x10x10"
-    "Quantize[mn,mx]": [-8.0, 8.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 16
     "ConstInputs": "/model/model_21_m_0_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_21_m_0_cv2_conv.layer.bias.uid57:0"
     "RuntimeMemory": "12.50KB"
-    "ScheduleId": "342"
+    "ScheduleId": "343"
 
   }
   blobs {
@@ -5348,7 +5365,7 @@ layer {
     scale_param {
     "InputShapes": "128x10x10"
     "OutputShape": "128x10x10"
-    "Quantize[mn,mx]": [-8.0, 8.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     "ConstInputs": "/model/model_21_m_0_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_21_m_0_cv2_conv.layer.bias.uid57:0"
@@ -5358,9 +5375,26 @@ layer {
 
 }
 layer {
+  name: "Cast: Cast_to_/model/Concat_20_2"
+  type: "Cast"
+  bottom: "/model/model_0_act_42/Mul_smr:0"
+  top: "Cast_to_/model/Concat_20_2:0"
+    scale_param {
+    "InputShapes": "128x10x10"
+    "OutputShape": "128x10x10"
+    "Quantize[mn,mx]": [-8.0, 8.0]
+    "QuantizeBits": 8
+    
+    "RuntimeMemory": "12.50KB"
+    "ScheduleId": "344"
+
+  }
+
+}
+layer {
   name: "Concat: /model/Concat_20"
   type: "Concat"
-  bottom: "/model/model_0_act_42/Mul_smr:0"
+  bottom: "Cast_to_/model/Concat_20_2:0"
   bottom: "transform-22-/model/Split_7sts0:0"
   bottom: "transform-23-/model/Split_7sts1:0"
   top: "/model/Concat_20:0"
@@ -5371,7 +5405,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "37.50KB"
-    "ScheduleId": "343"
+    "ScheduleId": "345"
 
   }
 
@@ -5389,7 +5423,7 @@ layer {
     "ConstInputs": "/model/model_21_cv2_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_21_cv2_conv.layer.bias.uid58:0"
     "RuntimeMemory": "25.00KB"
-    "ScheduleId": "344"
+    "ScheduleId": "346"
 
   }
   blobs {
@@ -5436,7 +5470,7 @@ layer {
     "ConstInputs": "/model/model_22_cv3_2_0_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv3_2_0_conv.layer.bias.uid60:0"
     "RuntimeMemory": "6.25KB"
-    "ScheduleId": "346"
+    "ScheduleId": "348"
 
   }
   blobs {
@@ -5483,7 +5517,7 @@ layer {
     "ConstInputs": "/model/model_22_cv2_2_0_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv2_2_0_conv.layer.bias.uid59:0"
     "RuntimeMemory": "6.25KB"
-    "ScheduleId": "345"
+    "ScheduleId": "347"
 
   }
   blobs {
@@ -5530,7 +5564,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "7.50KB"
-    "ScheduleId": "350"
+    "ScheduleId": "352"
 
   }
 
@@ -5548,7 +5582,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "7.50KB"
-    "ScheduleId": "347"
+    "ScheduleId": "349"
 
   }
 
@@ -5566,7 +5600,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "9.00KB"
-    "ScheduleId": "351"
+    "ScheduleId": "353"
 
   }
 
@@ -5584,7 +5618,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "9.00KB"
-    "ScheduleId": "348"
+    "ScheduleId": "350"
 
   }
 
@@ -5602,7 +5636,7 @@ layer {
     "ConstInputs": "/model/model_22_cv3_2_1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv3_2_1_conv.layer.bias.uid62:0"
     "RuntimeMemory": "6.25KB"
-    "ScheduleId": "352"
+    "ScheduleId": "354"
 
   }
   blobs {
@@ -5649,7 +5683,7 @@ layer {
     "ConstInputs": "/model/model_22_cv2_2_1_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv2_2_1_conv.layer.bias.uid61:0"
     "RuntimeMemory": "6.25KB"
-    "ScheduleId": "349"
+    "ScheduleId": "351"
 
   }
   blobs {
@@ -5691,12 +5725,12 @@ layer {
     scale_param {
     "InputShapes": "64x10x10, 6x64x1x1, 6"
     "OutputShape": "6x10x10"
-    "Quantize[mn,mx]": [-32.0, 32.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     "ConstInputs": "/model/model_22_cv3_2_2/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv3_2_2.layer.bias.uid64:0"
     "RuntimeMemory": "1.88KB"
-    "ScheduleId": "354"
+    "ScheduleId": "356"
 
   }
   blobs {
@@ -5726,7 +5760,7 @@ layer {
     "ConstInputs": "/model/model_22_cv2_2_2/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_cv2_2_2.layer.bias.uid63:0"
     "RuntimeMemory": "6.25KB"
-    "ScheduleId": "353"
+    "ScheduleId": "355"
 
   }
   blobs {
@@ -5751,11 +5785,11 @@ layer {
     scale_param {
     "InputShapes": "6x10x10"
     "OutputShape": "6x10x10"
-    "Quantize[mn,mx]": [-32.0, 32.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     
     "RuntimeMemory": "3.13KB"
-    "ScheduleId": "389"
+    "ScheduleId": "391"
 
   }
 
@@ -5772,7 +5806,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "6.25KB"
-    "ScheduleId": "355"
+    "ScheduleId": "357"
 
   }
 
@@ -5785,12 +5819,12 @@ layer {
     scale_param {
     "InputShapes": "6x10x10"
     "OutputShape": "6x100"
-    "Quantize[mn,mx]": [-32.0, 32.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     "HasScratch": "true"
     
     "RuntimeMemory": "4.00KB"
-    "ScheduleId": "390"
+    "ScheduleId": "392"
 
   }
 
@@ -5808,7 +5842,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "8.00KB"
-    "ScheduleId": "356"
+    "ScheduleId": "358"
 
   }
 
@@ -5821,11 +5855,11 @@ layer {
     scale_param {
     "InputShapes": "6x100"
     "OutputShape": "6x100"
-    "Quantize[mn,mx]": [-32.0, 32.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     
     "RuntimeMemory": "768B"
-    "ScheduleId": "391"
+    "ScheduleId": "393"
 
   }
 
@@ -5844,7 +5878,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "131.25KB"
-    "ScheduleId": "357"
+    "ScheduleId": "359"
 
   }
 
@@ -5853,17 +5887,17 @@ layer {
   name: "Concat: /model/Concat_24"
   type: "Concat"
   bottom: "transform-6-/model/Reshape_11:0"
-  bottom: "transform-7-/model/Reshape_17:0"
+  bottom: "transform-7-Cast_to_/model/Concat_24_1:0"
   bottom: "transform-8-/model/Reshape_25:0"
   top: "/model/Concat_24:0"
     scale_param {
     "InputShapes": "6x1600, 6x400, 6x100"
     "OutputShape": "6x2100"
-    "Quantize[mn,mx]": [-32.0, 32.0]
+    "Quantize[mn,mx]": [-16.0, 16.0]
     "QuantizeBits": 8
     
     "RuntimeMemory": "12.38KB"
-    "ScheduleId": "392"
+    "ScheduleId": "394"
 
   }
 
@@ -5880,7 +5914,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "132.00KB"
-    "ScheduleId": "358"
+    "ScheduleId": "360"
 
   }
 
@@ -5897,7 +5931,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "12.38KB"
-    "ScheduleId": "393"
+    "ScheduleId": "395"
 
   }
 
@@ -5915,7 +5949,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "132.00KB"
-    "ScheduleId": "359"
+    "ScheduleId": "361"
 
   }
 
@@ -5932,7 +5966,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "12.38KB"
-    "ScheduleId": "394"
+    "ScheduleId": "396"
 
   }
 
@@ -5949,7 +5983,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "132.00KB"
-    "ScheduleId": "360"
+    "ScheduleId": "362"
 
   }
 
@@ -5966,7 +6000,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "132.00KB"
-    "ScheduleId": "361"
+    "ScheduleId": "363"
 
   }
 
@@ -5983,7 +6017,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "132.00KB"
-    "ScheduleId": "362"
+    "ScheduleId": "364"
 
   }
 
@@ -6000,7 +6034,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "132.00KB"
-    "ScheduleId": "363"
+    "ScheduleId": "365"
 
   }
 
@@ -6017,7 +6051,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "132.00KB"
-    "ScheduleId": "364"
+    "ScheduleId": "366"
 
   }
 
@@ -6034,7 +6068,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "132.00KB"
-    "ScheduleId": "365"
+    "ScheduleId": "367"
 
   }
 
@@ -6051,7 +6085,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "132.00KB"
-    "ScheduleId": "366"
+    "ScheduleId": "368"
 
   }
 
@@ -6068,7 +6102,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "132.00KB"
-    "ScheduleId": "367"
+    "ScheduleId": "369"
 
   }
 
@@ -6086,7 +6120,7 @@ layer {
     "ConstInputs": "/model/model_22_dfl_conv/WeightsSymmetricQuantizer:0"
     "ConstInputs": "Variable.model.model_22_dfl_conv.layer.bias.uid65:0"
     "RuntimeMemory": "8.25KB"
-    "ScheduleId": "368"
+    "ScheduleId": "370"
 
   }
   blobs {
@@ -6116,7 +6150,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "8.25KB"
-    "ScheduleId": "369"
+    "ScheduleId": "371"
 
   }
 
@@ -6133,7 +6167,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "4.13KB"
-    "ScheduleId": "370"
+    "ScheduleId": "372"
 
   }
 
@@ -6150,7 +6184,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "4.13KB"
-    "ScheduleId": "371"
+    "ScheduleId": "373"
 
   }
 
@@ -6167,7 +6201,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "8.25KB"
-    "ScheduleId": "373"
+    "ScheduleId": "375"
 
   }
 
@@ -6184,7 +6218,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "8.25KB"
-    "ScheduleId": "372"
+    "ScheduleId": "374"
 
   }
 
@@ -6201,7 +6235,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "8.25KB"
-    "ScheduleId": "374"
+    "ScheduleId": "376"
 
   }
 
@@ -6218,7 +6252,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "8.25KB"
-    "ScheduleId": "377"
+    "ScheduleId": "379"
 
   }
 
@@ -6236,7 +6270,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "8.25KB"
-    "ScheduleId": "376"
+    "ScheduleId": "378"
 
   }
 
@@ -6254,7 +6288,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "8.25KB"
-    "ScheduleId": "379"
+    "ScheduleId": "381"
 
   }
 
@@ -6272,7 +6306,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "16.50KB"
-    "ScheduleId": "380"
+    "ScheduleId": "382"
 
   }
 
@@ -6290,7 +6324,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "16.50KB"
-    "ScheduleId": "382"
+    "ScheduleId": "384"
 
   }
 
@@ -6307,7 +6341,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "16.50KB"
-    "ScheduleId": "383"
+    "ScheduleId": "385"
 
   }
 
@@ -6324,7 +6358,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "16.50KB"
-    "ScheduleId": "384"
+    "ScheduleId": "386"
 
   }
 
@@ -6342,7 +6376,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "16.50KB"
-    "ScheduleId": "385"
+    "ScheduleId": "387"
 
   }
 
@@ -6359,7 +6393,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "16.50KB"
-    "ScheduleId": "386"
+    "ScheduleId": "388"
 
   }
 
@@ -6381,7 +6415,7 @@ layer {
     "HasScratch": "true"
     
     "RuntimeMemory": "1.25KB"
-    "ScheduleId": "395"
+    "ScheduleId": "397"
 
   }
 
@@ -6398,7 +6432,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "32B"
-    "ScheduleId": "397"
+    "ScheduleId": "399"
 
   }
 
@@ -6415,7 +6449,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "224B"
-    "ScheduleId": "399"
+    "ScheduleId": "401"
 
   }
 
@@ -6432,7 +6466,7 @@ layer {
     "QuantizeBits": 8
     
     "RuntimeMemory": "128B"
-    "ScheduleId": "401"
+    "ScheduleId": "403"
 
   }
 
@@ -6449,7 +6483,7 @@ layer {
     "QuantizeBits": 16
     
     "RuntimeMemory": "6.25KB"
-    "ScheduleId": "403"
+    "ScheduleId": "405"
 
   }
 
@@ -6465,7 +6499,7 @@ layer {
     
     
     "RuntimeMemory": "0B"
-    "ScheduleId": "398"
+    "ScheduleId": "400"
 
   }
 
@@ -6481,7 +6515,7 @@ layer {
     
     
     "RuntimeMemory": "0B"
-    "ScheduleId": "400"
+    "ScheduleId": "402"
 
   }
 
@@ -6497,7 +6531,7 @@ layer {
     
     
     "RuntimeMemory": "0B"
-    "ScheduleId": "402"
+    "ScheduleId": "404"
 
   }
 
@@ -6513,7 +6547,7 @@ layer {
     
     
     "RuntimeMemory": "0B"
-    "ScheduleId": "404"
+    "ScheduleId": "406"
 
   }
 

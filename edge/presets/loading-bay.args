@@ -1,0 +1,13 @@
+# SecurePi — LOADING BAY preset:  python edge/securePi.py @loading-bay.args
+# presets/common.args is applied automatically as the base; this file only
+# overrides what differs for this location.
+
+# Semi-outdoor area viewed from further away, similar to carpark: objects
+# appear smaller and move more px between frames, and detection is less
+# reliable than indoors. Deliveries also mean bags/boxes legitimately sit
+# unattended longer than in a lobby.
+--zone loading-bay
+--unattended-time 180       # staff step away from deliveries/luggage briefly
+--proximity 180             # wider owner radius — distances shrink at long range
+--stationary-radius 150     # tolerate larger frame-to-frame movement
+--min-confidence 0.45       # outdoor-ish lighting makes scores dip
