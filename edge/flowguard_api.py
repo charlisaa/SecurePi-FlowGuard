@@ -23,6 +23,7 @@ Design goals (see README "Cloud integration (FlowGuard)"):
 
 from __future__ import annotations
 
+import binascii
 import json
 import logging
 import os
@@ -46,6 +47,95 @@ CONFIG_ERROR = "config_error"  # HTTP 401/403 — halt sending; a token/URL fix 
 PERMANENT = "permanent"      # HTTP 400/422 (and other 4xx) — dead-letter, do not retry
 
 DEFAULT_ENDPOINT_PATH = "/api/edge/detection-alerts"
+
+# The snapshot upload is a bigger, slower request than the plain-JSON POST (a
+# few hundred KB over a phone hotspot) so it gets its own longer timeout. The
+# JSON path keeps using the client's configured `timeout` (default 5s).
+MULTIPART_TIMEOUT_SEC = 20.0
+
+# The server rejects a "snapshot" part over this size with 400.
+MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024
+
+# save_snapshot() on the Pi hands off the JPEG write to a background executor
+# and returns immediately, so the file usually doesn't exist yet when the alert
+# reaches the outbox. Poll briefly for it rather than blocking indefinitely.
+SNAPSHOT_WAIT_TIMEOUT_SEC = 2.0
+SNAPSHOT_WAIT_POLL_SEC = 0.05
+
+
+def _wait_for_snapshot_file(path: Path, timeout: float = SNAPSHOT_WAIT_TIMEOUT_SEC,
+                             poll: float = SNAPSHOT_WAIT_POLL_SEC) -> bool:
+    """Bounded wait (~2s) for a snapshot file to exist and be non-empty. Returns
+    False - never raises - if it doesn't show up in time, so the caller can fall
+    back to the JSON-only POST instead of blocking or losing the alert."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            if path.is_file() and path.stat().st_size > 0:
+                return True
+        except OSError:
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll)
+
+
+def _reencode_snapshot_under_limit(path: Path, max_bytes: int) -> Optional[bytes]:
+    """Re-encode an oversized JPEG at lower quality / resolution until it fits
+    under ``max_bytes``. Returns None (never raises) if cv2 is unavailable or it
+    still doesn't fit - the caller then omits the file part and sends JSON only,
+    rather than risk the server's 400 "snapshot must be a JPEG image"."""
+    try:
+        # Imported lazily (only when a snapshot actually needs shrinking) so this
+        # module stays free of a hard cv2 dependency and never disturbs cv2 test
+        # stubs that securePi.py's own tests install into sys.modules.
+        import cv2
+    except ImportError:  # pragma: no cover - off-device / cv2 not installed
+        return None
+    image = cv2.imread(str(path))
+    if image is None:
+        return None
+    for quality in (80, 60, 40):
+        ok, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+        if ok and buf.nbytes <= max_bytes:
+            return buf.tobytes()
+    h, w = image.shape[:2]
+    small = cv2.resize(image, (max(1, w // 2), max(1, h // 2)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", small, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+    if ok and buf.nbytes <= max_bytes:
+        return buf.tobytes()
+    return None
+
+
+def _multipart_encode(fields: dict, file_field: str, filename: str,
+                       file_bytes: bytes, file_content_type: str) -> tuple[bytes, str]:
+    """Hand-built multipart/form-data body (stdlib only, no `requests`). Every
+    non-None field is sent as a text part; dict/list values (sensor_metadata)
+    are JSON-encoded so the server can json.loads() them same as before."""
+    boundary = binascii.hexlify(os.urandom(16)).decode("ascii")
+    CRLF = b"\r\n"
+    lines = []
+    for key, value in fields.items():
+        if value is None:
+            continue
+        if isinstance(value, (dict, list)):
+            text = json.dumps(value)
+        else:
+            text = str(value)
+        lines.append(b"--" + boundary.encode("ascii"))
+        lines.append(f'Content-Disposition: form-data; name="{key}"'.encode("utf-8"))
+        lines.append(b"")
+        lines.append(text.encode("utf-8"))
+    lines.append(b"--" + boundary.encode("ascii"))
+    lines.append(
+        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"'.encode("utf-8")
+    )
+    lines.append(f"Content-Type: {file_content_type}".encode("ascii"))
+    lines.append(b"")
+    lines.append(file_bytes)
+    lines.append(b"--" + boundary.encode("ascii") + b"--")
+    lines.append(b"")
+    return CRLF.join(lines), boundary
 
 
 def classify_http_failure(status: Optional[int], exc: Optional[BaseException] = None) -> str:
@@ -316,18 +406,70 @@ class FlowGuardApiClient:
         except OSError as exc:
             self.log.error("[FlowGuard] Could not dead-letter %s: %s", path.name, exc)
 
+    def _prepare_snapshot_bytes(self, snapshot_path: str) -> Optional[bytes]:
+        """Return JPEG bytes ready to upload, or None (never raises) if the file
+        never lands, is unreadable, or is too big even after re-encoding — in
+        which case the caller falls back to the JSON-only POST."""
+        path = Path(snapshot_path)
+        if not _wait_for_snapshot_file(path):
+            self.log.warning(
+                "[FlowGuard] Snapshot %s not ready within %.1fs — sending alert without image.",
+                path.name, SNAPSHOT_WAIT_TIMEOUT_SEC,
+            )
+            return None
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            self.log.warning("[FlowGuard] Could not read snapshot %s: %s", path.name, exc)
+            return None
+        if not data:
+            return None
+        if len(data) > MAX_SNAPSHOT_BYTES:
+            smaller = _reencode_snapshot_under_limit(path, MAX_SNAPSHOT_BYTES)
+            if smaller is None:
+                self.log.warning(
+                    "[FlowGuard] Snapshot %s exceeds %d bytes and could not be shrunk — "
+                    "sending alert without image.", path.name, MAX_SNAPSHOT_BYTES,
+                )
+                return None
+            data = smaller
+        return data
+
     def send_event(self, event: dict):
         """POST a single event synchronously. Returns (classification, status, body).
-        Never raises — transport errors are classified as RETRYABLE."""
+        Never raises — transport errors are classified as RETRYABLE. Uploads the
+        alert snapshot as multipart/form-data (part "snapshot", image/jpeg) when
+        the JPEG is ready and small enough; otherwise falls back to the original
+        application/json POST so an alert is never lost for want of an image."""
         url = f"{self.api_url}{self.endpoint_path}"
+        snapshot_path = event.get("snapshot_path")
+        image_bytes = self._prepare_snapshot_bytes(snapshot_path) if snapshot_path else None
+        if image_bytes is not None:
+            return self._post_multipart(url, event, image_bytes)
+        return self._post_json(url, event)
+
+    def _post_json(self, url: str, event: dict):
         body = json.dumps(event).encode("utf-8")
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
         request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        return self._do_request(request, self.timeout)
+
+    def _post_multipart(self, url: str, event: dict, image_bytes: bytes):
+        filename = Path(event.get("snapshot_path") or "snapshot.jpg").name or "snapshot.jpg"
+        body, boundary = _multipart_encode(event, "snapshot", filename, image_bytes, "image/jpeg")
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        }
+        request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        return self._do_request(request, MULTIPART_TIMEOUT_SEC)
+
+    def _do_request(self, request: "urllib.request.Request", timeout: float):
         try:
-            response = self._urlopen(request, timeout=self.timeout)
+            response = self._urlopen(request, timeout=timeout)
             status = getattr(response, "status", None)
             if status is None and hasattr(response, "getcode"):
                 status = response.getcode()

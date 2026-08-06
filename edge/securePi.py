@@ -147,17 +147,18 @@ class Config:
     # category's shared threshold; any label absent still falls back to the
     # category default. See --class-confidence.
     #
-    # suitcase/mouse are raised here on direct evidence from a real deployment
-    # log (runtime/logs/events.csv): both classes repeatedly triggered right at
-    # the old flat 0.5 floor (scores as low as 0.44-0.56), and that session
-    # showed severe bag-track fragmentation (one physical object spawning dozens
-    # of short-lived track ids) consistent with noisy, borderline detections
-    # being fed to the tracker. rat is intentionally left at the pest_confidence
-    # default: its poor real-world hit rate traces to training data (the "rat"
-    # class was trained on Hamster images, never a real rat -- see
-    # docs/MODELS.md), which no confidence threshold can fix.
+    # No "suitcase" entry: IMX500Detector.detect() remaps every "suitcase"
+    # prediction to "backpack" right after classification (the class
+    # confidently misfires on backpacks/handbags - see docs/MODELS.md), so a
+    # detection can never carry that label here. mouse is raised on direct
+    # evidence from a real deployment log (runtime/logs/events.csv): it
+    # repeatedly triggered right at the old flat 0.5 floor (scores as low as
+    # 0.44-0.56), consistent with noisy, borderline detections being fed to
+    # the tracker. rat is intentionally left at the pest_confidence default:
+    # its poor real-world hit rate traces to training data (the "rat" class
+    # was trained on Hamster images, never a real rat -- see docs/MODELS.md),
+    # which no confidence threshold can fix.
     class_confidence: dict[str, float] = field(default_factory=lambda: {
-        "suitcase": 0.55,
         "mouse": 0.55,
     })
     box_smoothing: float = 0.6           # weight of the newest detection when smoothing a
@@ -624,6 +625,14 @@ class IMX500Detector:
             )
 
             label = self._label_for(category_value)
+            if label == "suitcase":
+                # The custom model's "suitcase" class is unreliable - it
+                # confidently (scores up to 0.80 in real deployment logs, not
+                # just borderline noise) fires on backpacks/handbags instead.
+                # Until it's retrained with a properly balanced bag dataset,
+                # remap it to "backpack" here, before tracking, alerting, or
+                # logging ever sees the label.
+                label = "backpack"
 
             detections.append(
                 Detection(
@@ -1553,7 +1562,7 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Per-label confidence overrides layered on top of "
                         "--min-confidence (person/object labels) or "
                         "--pest-confidence (pest labels), e.g. "
-                        "--class-confidence suitcase=0.55 backpack=0.45. Repeat to set "
+                        "--class-confidence backpack=0.55 mouse=0.45. Repeat to set "
                         f"multiple labels (built-in overrides: {d.class_confidence}).")
     p.add_argument("--box-smoothing", type=float, default=d.box_smoothing,
                    help="Weight of the newest detection when smoothing drawn boxes, "
