@@ -64,6 +64,9 @@ import concurrent.futures
 import cv2
 import numpy as np
 
+import base64
+import urllib.error
+
 try:
     from picamera2 import Picamera2
     from picamera2.devices import IMX500
@@ -1407,8 +1410,9 @@ def run(config: Config, client=None) -> None:
                         continue  # don't draw a coasting person's stale box
                     visible_persons += 1
                     tag = " (owner)" if person.person_id in owner_ids else ""
-                    renderer.draw_box(frame, person.box, COLOR_PERSON,
-                                      f"Person #{person.person_id}{tag}")
+                    face_label = _recognize_person_with_flowguard(frame, person.box, person.person_id)
+                    display_name = face_label or f"Person #{person.person_id}"
+                    renderer.draw_box(frame, person.box, COLOR_PERSON, f"{display_name}{tag}")
                 for bag in tracker.bags.values():
                     renderer.handle_bag(frame, bag, now)
                 for pest in pest_tracker.pests.values():
@@ -1694,6 +1698,81 @@ def _merge_class_confidence(pairs: list[str], base: dict[str, float]) -> dict[st
             raise SystemExit(f"--class-confidence expects LABEL=VALUE, got {pair!r}")
         merged[label.strip().lower()] = float(value)
     return merged
+
+
+_FACE_NAME_CACHE = {}
+_FACE_LAST_CHECK = {}
+_FACE_CHECK_INTERVAL_SEC = 3.0
+
+
+def _recognize_person_with_flowguard(frame, box, person_id):
+    """Call FlowGuard facial recognition and cache name per SecurePi person track."""
+    api_url = os.environ.get("FLOWGUARD_API_URL", "").rstrip("/")
+    edge_token = os.environ.get("EDGE_SERVICE_TOKEN", "")
+
+    if not api_url or not edge_token:
+        return None
+
+    now = time.monotonic()
+    last_check = _FACE_LAST_CHECK.get(person_id, 0)
+    if now - last_check < _FACE_CHECK_INTERVAL_SEC:
+        return _FACE_NAME_CACHE.get(person_id)
+
+    _FACE_LAST_CHECK[person_id] = now
+
+    x, y, w, h = box
+    fh, fw = frame.shape[:2]
+
+    x1 = max(0, int(x))
+    y1 = max(0, int(y))
+    x2 = min(fw, int(x + w))
+    y2 = min(fh, int(y + h))
+
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        return _FACE_NAME_CACHE.get(person_id)
+
+    ok, buffer = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+    if not ok:
+        return _FACE_NAME_CACHE.get(person_id)
+
+    image_b64 = base64.b64encode(buffer).decode("ascii")
+    payload = json.dumps({
+        "image": f"data:image/jpeg;base64,{image_b64}",
+        "cameraLocation": os.environ.get("SECUREPI_CAMERA_LOCATION", "SecurePi Camera"),
+    }).encode("utf-8")
+
+    request = urllib.request.Request(
+        f"{api_url}/api/facial-recognition/recognize",
+        data=payload,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "x-edge-token": edge_token,
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return _FACE_NAME_CACHE.get(person_id)
+
+    user = data.get("user") or {}
+    name = user.get("name")
+    status = user.get("status")
+    confidence = user.get("confidence")
+
+    if name and status == "AUTHORIZED":
+        label = f"{name} {float(confidence or 0):.2f}"
+        _FACE_NAME_CACHE[person_id] = label
+        return label
+
+    if name == "Unknown Person":
+        _FACE_NAME_CACHE[person_id] = "Unknown Person"
+        return "Unknown Person"
+
+    return _FACE_NAME_CACHE.get(person_id)
 
 
 def main(argv=None) -> None:
