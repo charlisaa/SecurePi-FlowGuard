@@ -228,6 +228,12 @@ class Config:
     zone: Optional[str] = None           # preset/location tag recorded in the event log
     snapshot_dir: Optional[Path] = None  # override; default: <runtime>/snapshots[/<zone>]
     log_dir: Optional[Path] = None       # override; default: <runtime>/logs
+    restricted_hours_start: str = field(
+        default_factory=lambda: os.environ.get("RESTRICTED_HOURS_START", "08:00")
+    )
+    restricted_hours_end: str = field(
+        default_factory=lambda: os.environ.get("RESTRICTED_HOURS_END", "23:00")
+    )
 
     # --- IMX500 detector settings ----------------------------------------
     model_path: str = DEFAULT_MODEL
@@ -1435,6 +1441,8 @@ def run(config: Config, client=None, sensor_bridge=None) -> None:
             client=client,
             zone_name=zone,
             camera_location=getattr(config, "camera_location", "Camera 01") or f"{zone} Camera",
+            hours_start=getattr(config, "restricted_hours_start", os.environ.get("RESTRICTED_HOURS_START", "08:00")),
+            hours_end=getattr(config, "restricted_hours_end", os.environ.get("RESTRICTED_HOURS_END", "23:00")),
         )
 
     if sensor_bridge is not None and start_sensor_reader_thread:
@@ -1816,6 +1824,12 @@ def parse_args(argv=None) -> argparse.Namespace:
                    default=os.environ.get("SECUREPI_OUTBOX_DIR"),
                    help="Disk-backed outbox directory (default <runtime-dir>/alerts/outbox "
                         "or SECUREPI_OUTBOX_DIR).")
+    p.add_argument("--hours-start", "--restricted-hours-start", dest="restricted_hours_start",
+                   default=os.environ.get("RESTRICTED_HOURS_START", d.restricted_hours_start),
+                   help="Restricted hours start HH:MM, Singapore time (default from RESTRICTED_HOURS_START or 08:00).")
+    p.add_argument("--hours-end", "--restricted-hours-end", dest="restricted_hours_end",
+                   default=os.environ.get("RESTRICTED_HOURS_END", d.restricted_hours_end),
+                   help="Restricted hours end HH:MM, Singapore time (default from RESTRICTED_HOURS_END or 23:00).")
     p.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
     raw = sys.argv[1:] if argv is None else list(argv)
     expanded = _resolve_preset_refs(raw)
@@ -2036,6 +2050,8 @@ def main(argv=None) -> None:
         stream_port=args.stream_port,
         stream_fps=args.stream_fps,
         stream_quality=args.stream_quality,
+        restricted_hours_start=args.restricted_hours_start,
+        restricted_hours_end=args.restricted_hours_end,
     )
     client = _build_flowguard_client(args, config)
     run(config, client=client)

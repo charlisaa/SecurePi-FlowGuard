@@ -429,3 +429,56 @@ def test_single_serial_reader_thread_enforcement():
         t2 = start_sensor_reader_thread(bridge, "COM_TEST")
         assert t1 is t2
 
+
+def test_default_restricted_hours_08_to_23_defaults():
+    with patch.dict(os.environ, {}, clear=True):
+        cfg = Config()
+        assert cfg.restricted_hours_start == "08:00"
+        assert cfg.restricted_hours_end == "23:00"
+        bridge = SensorBridge()
+        assert bridge.hours_start == "08:00"
+        assert bridge.hours_end == "23:00"
+
+
+def test_securepi_runtime_honors_configured_restricted_hours():
+    with patch.dict(os.environ, {"RESTRICTED_HOURS_START": "13:30", "RESTRICTED_HOURS_END": "17:30"}):
+        cfg = Config()
+        assert cfg.restricted_hours_start == "13:30"
+        assert cfg.restricted_hours_end == "17:30"
+        import securePi
+        with patch("securePi.Picamera2"), patch("securePi.IMX500Detector"), patch("securePi.signal.signal"), patch("securePi.start_sensor_reader_thread"):
+            with patch("securePi.SensorBridge", wraps=SensorBridge) as mock_sb:
+                try:
+                    securePi.run(cfg)
+                except Exception:
+                    pass
+                assert mock_sb.called
+                kwargs = mock_sb.call_args.kwargs
+                assert kwargs["hours_start"] == "13:30"
+                assert kwargs["hours_end"] == "17:30"
+
+
+def test_after_hours_true_at_1400_for_1330_to_1730_window():
+    bridge = SensorBridge(hours_start="13:30", hours_end="17:30")
+    t_1400 = datetime(2026, 8, 8, 14, 0, 0, tzinfo=SGT)
+    st = bridge.get_sensor_status(now=t_1400)
+    assert st["after_hours"] is True
+
+
+def test_after_hours_false_at_1800_for_1330_to_1730_window():
+    bridge = SensorBridge(hours_start="13:30", hours_end="17:30")
+    t_1800 = datetime(2026, 8, 8, 18, 0, 0, tzinfo=SGT)
+    st = bridge.get_sensor_status(now=t_1800)
+    assert st["after_hours"] is False
+
+
+def test_overnight_restricted_hours_22_to_06():
+    bridge = SensorBridge(hours_start="22:00", hours_end="06:00")
+    t_2300 = datetime(2026, 8, 8, 23, 0, 0, tzinfo=SGT)
+    t_0300 = datetime(2026, 8, 8, 3, 0, 0, tzinfo=SGT)
+    t_1400 = datetime(2026, 8, 8, 14, 0, 0, tzinfo=SGT)
+    assert bridge.get_sensor_status(now=t_2300)["after_hours"] is True
+    assert bridge.get_sensor_status(now=t_0300)["after_hours"] is True
+    assert bridge.get_sensor_status(now=t_1400)["after_hours"] is False
+
+

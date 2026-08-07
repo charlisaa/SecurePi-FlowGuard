@@ -93,8 +93,8 @@ class SensorBridge:
         client: Optional[FlowGuardApiClient] = None,
         zone_name: str = "Restricted Zone",
         camera_location: str = "Camera 01",
-        hours_start: str = "22:00",
-        hours_end: str = "06:00",
+        hours_start: str = "08:00",
+        hours_end: str = "23:00",
         cooldown_sec: float = 60.0,
         inspection_window_sec: float = 10.0,
         device_id: Optional[str] = None,
@@ -186,6 +186,10 @@ class SensorBridge:
             pir_ready = bool(d.get("pir_ready", True))
             trigger_val = self._last_trigger if active else d.get("trigger")
 
+            after_hours = d.get("after_hours")
+            if after_hours is None:
+                after_hours = restricted
+
             return {
                 "connected": connected,
                 "pir_ready": pir_ready,
@@ -198,7 +202,7 @@ class SensorBridge:
                 "trigger": trigger_val,
                 "inspection_active": active,
                 "inspection_remaining_seconds": rem,
-                "after_hours": bool(d.get("after_hours", restricted)),
+                "after_hours": bool(after_hours),
                 "inspection_id": self._current_inspection_id if active else None,
             }
 
@@ -422,9 +426,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--camera-location",
                    default=env.get("RESTRICTED_CAMERA_LOCATION", "Chemical Storage Camera 01"),
                    help="Camera label for the event (default from RESTRICTED_CAMERA_LOCATION).")
-    p.add_argument("--hours-start", default=env.get("RESTRICTED_HOURS_START", "22:00"),
+    p.add_argument("--hours-start", default=env.get("RESTRICTED_HOURS_START", "08:00"),
                    help="Restricted hours start HH:MM, Singapore time (default from RESTRICTED_HOURS_START).")
-    p.add_argument("--hours-end", default=env.get("RESTRICTED_HOURS_END", "06:00"),
+    p.add_argument("--hours-end", default=env.get("RESTRICTED_HOURS_END", "23:00"),
                    help="Restricted hours end HH:MM, Singapore time (default from RESTRICTED_HOURS_END).")
     p.add_argument("--cooldown", type=float,
                    default=float(env.get("MOTION_ALERT_COOLDOWN_SEC", "60") or 60),
