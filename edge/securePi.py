@@ -1225,7 +1225,7 @@ class _StreamHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 
 
 class StreamServer:
-    """Embedded HTTP server exposing /health, /video_feed, /people-count, and /snapshot.
+    """Embedded HTTP server exposing /health, /sensor_status, /video_feed, /people-count, and /snapshot.
 
     Lives inside the SecurePi process in a background thread and serves only
     frames the detection loop has already annotated and published to a
@@ -1234,9 +1234,9 @@ class StreamServer:
     disconnecting client can only ever kill its own handler thread.
     """
 
-    def __init__(self, config: Config, buffer: FrameBuffer, state_provider: Optional[Callable] = None) -> None:
+    def __init__(self, config: Config, buffer: FrameBuffer, state_provider: Optional[Callable] = None, sensor_bridge: Optional[Any] = None) -> None:
         self._stop_event = threading.Event()
-        handler = self._make_handler(buffer, self._stop_event, state_provider)
+        handler = self._make_handler(buffer, self._stop_event, state_provider, sensor_bridge)
         self._httpd = _StreamHTTPServer((config.stream_host, config.stream_port),
                                         handler)
         self._thread = threading.Thread(target=self._httpd.serve_forever,
@@ -1256,7 +1256,7 @@ class StreamServer:
         self._thread.join(timeout=5.0)
 
     @staticmethod
-    def _make_handler(buffer: FrameBuffer, stop_event: threading.Event, state_provider: Optional[Callable] = None):
+    def _make_handler(buffer: FrameBuffer, stop_event: threading.Event, state_provider: Optional[Callable] = None, sensor_bridge: Optional[Any] = None):
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, fmt: str, *args) -> None:
                 LOGGER.debug("HTTP %s %s", self.address_string(), fmt % args)
@@ -1270,6 +1270,8 @@ class StreamServer:
                     path = self.path.split("?", 1)[0]
                     if path == "/health":
                         self._serve_health()
+                    elif path == "/sensor_status":
+                        self._serve_sensor_status()
                     elif path == "/video_feed":
                         self._serve_video_feed()
                     elif path == "/people-count":
@@ -1284,14 +1286,60 @@ class StreamServer:
                     # detection loop or the other clients.
                     LOGGER.debug("HTTP client %s disconnected", self.address_string())
 
+            def _serve_sensor_status(self) -> None:
+                if sensor_bridge and hasattr(sensor_bridge, "get_sensor_status"):
+                    st = sensor_bridge.get_sensor_status()
+                else:
+                    st = {
+                        "connected": False,
+                        "pir_ready": False,
+                        "pir": False,
+                        "motion": False,
+                        "distance_cm": None,
+                        "baseline_distance_cm": None,
+                        "distance_change_cm": None,
+                        "object_close": False,
+                        "trigger": None,
+                        "inspection_active": False,
+                        "inspection_remaining_seconds": 0.0,
+                        "after_hours": False,
+                        "inspection_id": None,
+                    }
+                body = json.dumps(st).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self._common_headers()
+                self.end_headers()
+                self.wfile.write(body)
+
             def _serve_health(self) -> None:
                 age = buffer.age_seconds()
+                if sensor_bridge and hasattr(sensor_bridge, "get_sensor_status"):
+                    sensor_st = sensor_bridge.get_sensor_status()
+                else:
+                    sensor_st = {
+                        "connected": False,
+                        "pir_ready": False,
+                        "pir": False,
+                        "motion": False,
+                        "distance_cm": None,
+                        "baseline_distance_cm": None,
+                        "distance_change_cm": None,
+                        "object_close": False,
+                        "trigger": None,
+                        "inspection_active": False,
+                        "inspection_remaining_seconds": 0.0,
+                        "after_hours": False,
+                        "inspection_id": None,
+                    }
                 body = json.dumps({
                     "status": "online",
                     "camera": "IMX500",
                     "streaming": True,
                     "latest_frame_age_seconds": (round(age, 3)
                                                  if age is not None else None),
+                    "sensor": sensor_st,
                 }).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -1389,6 +1437,11 @@ def run(config: Config, client=None, sensor_bridge=None) -> None:
             camera_location=getattr(config, "camera_location", "Camera 01") or f"{zone} Camera",
         )
 
+    if sensor_bridge is not None and start_sensor_reader_thread:
+        port = _default_serial_port() if callable(_default_serial_port) else None
+        if port:
+            start_sensor_reader_thread(sensor_bridge, port)
+
     picam2 = Picamera2(detector.camera_num)
     controls = {}
     if detector.inference_rate:
@@ -1419,9 +1472,9 @@ def run(config: Config, client=None, sensor_bridge=None) -> None:
     stream_server: Optional[StreamServer] = None
     if config.stream_enabled:
         frame_buffer = FrameBuffer()
-        stream_server = StreamServer(config, frame_buffer, state_provider=state_provider)
+        stream_server = StreamServer(config, frame_buffer, state_provider=state_provider, sensor_bridge=sensor_bridge)
         stream_server.start()
-        LOGGER.info("MJPEG stream on http://%s:%d/video_feed (health: /health, telemetry: /people-count, snapshot: /snapshot)",
+        LOGGER.info("MJPEG stream on http://%s:%d/video_feed (health: /health, telemetry: /people-count, snapshot: /snapshot, sensor: /sensor_status)",
                     config.stream_host, stream_server.port)
     stream_interval = 1.0 / config.stream_fps
     next_publish = 0.0

@@ -116,30 +116,91 @@ class SensorBridge:
         self._prev_object_close = False
         self._last_alert_dt: Optional[datetime] = None
         self._inspection_expiry_dt: Optional[datetime] = None
+        self._last_seen_dt: Optional[datetime] = None
+        self._current_inspection_id: Optional[str] = None
+        self._last_trigger: Optional[str] = None
+        self._reader_thread: Optional[threading.Thread] = None
+        self.latest_raw_sensor_data: dict = {}
         self.latest_sensor_metadata: dict = {}
         self._lock = threading.Lock()
+
+    def _is_inspection_active_unlocked(self, now: datetime) -> bool:
+        if self._inspection_expiry_dt is not None:
+            if now < self._inspection_expiry_dt:
+                return True
+            else:
+                self._inspection_expiry_dt = None
+                self._current_inspection_id = None
+                self._last_trigger = None
+        return False
 
     def is_inspection_active(self, now: Optional[datetime] = None) -> bool:
         """Returns True if a sensor-triggered inspection window is currently active."""
         if now is None:
             now = datetime.now(SGT)
         with self._lock:
-            if self._inspection_expiry_dt is not None:
-                if now < self._inspection_expiry_dt:
-                    return True
-                else:
-                    self._inspection_expiry_dt = None
-            return False
+            return self._is_inspection_active_unlocked(now)
 
-    def trigger_inspection(self, metadata: dict, now: Optional[datetime] = None) -> None:
+    def trigger_inspection(self, metadata: dict, trigger_type: Optional[str] = None, now: Optional[datetime] = None) -> None:
         """Explicitly open or extend an inspection window with the given sensor metadata."""
         if now is None:
             now = datetime.now(SGT)
         with self._lock:
+            currently_active = self._is_inspection_active_unlocked(now)
             self._inspection_expiry_dt = now + timedelta(seconds=self.inspection_window_sec)
+
+            if not currently_active or not self._current_inspection_id:
+                timestamp_str = now.strftime("%Y%m%d%H%M%S")
+                rand_hex = os.urandom(4).hex()
+                self._current_inspection_id = f"insp_{timestamp_str}_{rand_hex}"
+
+            trig = trigger_type or metadata.get("trigger")
+            if trig:
+                self._last_trigger = str(trig)
+
             meta = dict(metadata)
             meta["inspection_active"] = True
+            meta["inspection_id"] = self._current_inspection_id
             self.latest_sensor_metadata = meta
+
+    def get_sensor_status(self, now: Optional[datetime] = None) -> dict:
+        """Return normalized live telemetry dictionary for HTTP endpoints."""
+        if now is None:
+            now = datetime.now(SGT)
+        with self._lock:
+            active = self._is_inspection_active_unlocked(now)
+            rem = 0.0
+            if active and self._inspection_expiry_dt is not None:
+                rem = max(0.0, round((self._inspection_expiry_dt - now).total_seconds(), 1))
+
+            connected = (
+                self._last_seen_dt is not None
+                and (now - self._last_seen_dt).total_seconds() <= 5.0
+            )
+
+            restricted = in_restricted_hours(now, self.hours_start, self.hours_end)
+            d = self.latest_raw_sensor_data or {}
+
+            pir = bool(d.get("pir", d.get("motion", False)))
+            motion = bool(d.get("motion", pir))
+            pir_ready = bool(d.get("pir_ready", True))
+            trigger_val = self._last_trigger if active else d.get("trigger")
+
+            return {
+                "connected": connected,
+                "pir_ready": pir_ready,
+                "pir": pir,
+                "motion": motion,
+                "distance_cm": d.get("distance_cm"),
+                "baseline_distance_cm": d.get("baseline_distance_cm"),
+                "distance_change_cm": d.get("distance_change_cm"),
+                "object_close": bool(d.get("object_close", False)),
+                "trigger": trigger_val,
+                "inspection_active": active,
+                "inspection_remaining_seconds": rem,
+                "after_hours": bool(d.get("after_hours", restricted)),
+                "inspection_id": self._current_inspection_id if active else None,
+            }
 
     def process_line(self, line: str, now: Optional[datetime] = None) -> Optional[dict]:
         """Process one serial line. Returns the event dict when an alert fires
@@ -151,6 +212,10 @@ class SensorBridge:
         data = parse_sensor_line(line)
         if data is None:
             return None
+
+        with self._lock:
+            self._last_seen_dt = now
+            self.latest_raw_sensor_data = data
 
         motion = bool(data.get("motion", data.get("pir")))
         pir_ready = bool(data.get("pir_ready", True))
@@ -199,7 +264,7 @@ class SensorBridge:
         }
 
         # Activate bounded inspection window
-        self.trigger_inspection(sensor_metadata, now=now)
+        self.trigger_inspection(sensor_metadata, trigger_type=trigger_type, now=now)
 
         # Cooldown between motion alerts.
         if self._last_alert_dt is not None and (now - self._last_alert_dt).total_seconds() < self.cooldown_sec:
@@ -288,6 +353,11 @@ def start_sensor_reader_thread(
 ) -> Optional[threading.Thread]:
     """Launch a background daemon thread reading Arduino serial lines into ``bridge``.
     Defensive against serial reconnects and port absence."""
+    existing_thread = getattr(bridge, "_reader_thread", None)
+    if existing_thread is not None and existing_thread.is_alive():
+        LOGGER.debug("[SensorBridgeThread] Reader thread already running on %s", serial_port)
+        return existing_thread
+
     def _reader_loop():
         try:
             import serial
@@ -314,6 +384,7 @@ def start_sensor_reader_thread(
                 time.sleep(2.0)
 
     thread = threading.Thread(target=_reader_loop, name="securepi-sensor-reader", daemon=True)
+    bridge._reader_thread = thread
     thread.start()
     return thread
 

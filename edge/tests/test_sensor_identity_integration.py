@@ -306,28 +306,66 @@ def test_12_13_14_15_16_edge_alert_payload_and_idempotency():
 
 
 # --------------------------------------------------------------------------
-# 20-23. Telemetry Endpoints on StreamServer (/health, /video_feed, /people-count, /snapshot)
+# 20-24. Telemetry Endpoints on StreamServer (/health, /sensor_status, /video_feed, /people-count, /snapshot)
 # --------------------------------------------------------------------------
 
 def test_20_23_telemetry_endpoints():
     buffer = FrameBuffer()
     buffer.publish(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xd9") # minimal JPEG
 
-    state_provider = lambda: {"count": 2, "detection_active": True}
+    bridge = SensorBridge(hours_start="00:00", hours_end="23:59")
+    now = datetime.now(SGT)
+    line = json.dumps({
+        "type": "sensor_status",
+        "pir": False,
+        "motion": False,
+        "pir_ready": True,
+        "distance_cm": 42.5,
+        "baseline_distance_cm": 120.0,
+        "distance_change_cm": 77.5,
+        "object_close": True,
+        "trigger": "ultrasonic"
+    })
+    bridge.process_line(line, now=now)
+    bridge.trigger_inspection({"distance_cm": 42.5, "object_close": True}, trigger_type="ULTRASONIC", now=now)
+
+    state_provider = lambda: {"count": 2, "detection_active": bridge.is_inspection_active()}
     cfg = Config(stream_host="127.0.0.1", stream_port=0)
 
-    server = StreamServer(cfg, buffer, state_provider=state_provider)
+    server = StreamServer(cfg, buffer, state_provider=state_provider, sensor_bridge=bridge)
     server.start()
     port = server.port
 
     import urllib.request
     try:
-        # GET /health
+        # GET /sensor_status
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/sensor_status") as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            assert resp.status == 200
+            assert data["connected"] is True
+            assert data["pir_ready"] is True
+            assert data["pir"] is False
+            assert data["motion"] is False
+            assert data["distance_cm"] == 42.5
+            assert data["baseline_distance_cm"] == 120.0
+            assert data["distance_change_cm"] == 77.5
+            assert data["object_close"] is True
+            assert data["trigger"] == "ULTRASONIC"
+            assert data["inspection_active"] is True
+            assert data["inspection_remaining_seconds"] > 0
+            assert data["inspection_id"].startswith("insp_")
+
+        # GET /health (includes sensor block and preserves all existing fields)
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/health") as resp:
             data = json.loads(resp.read().decode("utf-8"))
             assert resp.status == 200
             assert data["status"] == "online"
             assert data["camera"] == "IMX500"
+            assert data["streaming"] is True
+            assert "latest_frame_age_seconds" in data
+            assert "sensor" in data
+            assert data["sensor"]["distance_cm"] == 42.5
+            assert data["sensor"]["inspection_id"].startswith("insp_")
 
         # GET /people-count
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/people-count") as resp:
@@ -345,3 +383,49 @@ def test_20_23_telemetry_endpoints():
 
     finally:
         server.stop()
+
+
+def test_inspection_id_lifecycle():
+    bridge = SensorBridge(hours_start="00:00", hours_end="23:59")
+    t0 = datetime.now(SGT)
+
+    # 1. Trigger inspection cycle
+    bridge.trigger_inspection({"motion": True}, trigger_type="PIR", now=t0)
+    st0 = bridge.get_sensor_status(now=t0)
+    insp_id1 = st0["inspection_id"]
+    assert insp_id1 is not None and insp_id1.startswith("insp_")
+
+    # 2. Continuous polling during active inspection retains exact same inspection_id
+    t1 = t0 + timedelta(seconds=2)
+    st1 = bridge.get_sensor_status(now=t1)
+    assert st1["inspection_id"] == insp_id1
+
+    # Extend inspection during window
+    bridge.trigger_inspection({"motion": True}, trigger_type="PIR", now=t1)
+    st1_ext = bridge.get_sensor_status(now=t1)
+    assert st1_ext["inspection_id"] == insp_id1
+
+    # 3. Window expires
+    t2 = t0 + timedelta(seconds=20)
+    st2 = bridge.get_sensor_status(now=t2)
+    assert st2["inspection_active"] is False
+    assert st2["inspection_id"] is None
+
+    # 4. Next genuine inspection receives a new inspection_id
+    t3 = t2 + timedelta(seconds=5)
+    bridge.trigger_inspection({"motion": True}, trigger_type="PIR", now=t3)
+    st3 = bridge.get_sensor_status(now=t3)
+    insp_id2 = st3["inspection_id"]
+    assert insp_id2 is not None and insp_id2.startswith("insp_")
+    assert insp_id2 != insp_id1
+
+
+def test_single_serial_reader_thread_enforcement():
+    bridge = SensorBridge(hours_start="00:00", hours_end="23:59")
+    from sensor_bridge import start_sensor_reader_thread
+
+    with patch("os.path.exists", return_value=False):
+        t1 = start_sensor_reader_thread(bridge, "COM_TEST")
+        t2 = start_sensor_reader_thread(bridge, "COM_TEST")
+        assert t1 is t2
+
