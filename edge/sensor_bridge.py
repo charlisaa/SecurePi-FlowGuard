@@ -25,6 +25,8 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -82,17 +84,19 @@ def in_restricted_hours(now: datetime, start: str, end: str) -> bool:
 
 class SensorBridge:
     """Turns Arduino sensor lines into restricted-motion events (rising-edge only,
-    warm-up-safe, restricted-hours-gated, with a cooldown)."""
+    warm-up-safe, restricted-hours-gated, with a cooldown) and maintains the active
+    sensor inspection state for securePi camera identity matching."""
 
     def __init__(
         self,
         *,
-        client: Optional[FlowGuardApiClient],
-        zone_name: str,
-        camera_location: str,
-        hours_start: str,
-        hours_end: str,
-        cooldown_sec: float,
+        client: Optional[FlowGuardApiClient] = None,
+        zone_name: str = "Restricted Zone",
+        camera_location: str = "Camera 01",
+        hours_start: str = "22:00",
+        hours_end: str = "06:00",
+        cooldown_sec: float = 60.0,
+        inspection_window_sec: float = 10.0,
         device_id: Optional[str] = None,
         dry_run: bool = False,
         logger: Optional[logging.Logger] = None,
@@ -103,12 +107,39 @@ class SensorBridge:
         self.hours_start = hours_start
         self.hours_end = hours_end
         self.cooldown_sec = float(cooldown_sec)
+        self.inspection_window_sec = float(inspection_window_sec)
         self.device_id = device_id or (getattr(client, "device_id", None) if client else None) or "securepi-sensor"
         self.dry_run = bool(dry_run)
         self.log = logger or LOGGER
 
         self._prev_motion = False
+        self._prev_object_close = False
         self._last_alert_dt: Optional[datetime] = None
+        self._inspection_expiry_dt: Optional[datetime] = None
+        self.latest_sensor_metadata: dict = {}
+        self._lock = threading.Lock()
+
+    def is_inspection_active(self, now: Optional[datetime] = None) -> bool:
+        """Returns True if a sensor-triggered inspection window is currently active."""
+        if now is None:
+            now = datetime.now(SGT)
+        with self._lock:
+            if self._inspection_expiry_dt is not None:
+                if now < self._inspection_expiry_dt:
+                    return True
+                else:
+                    self._inspection_expiry_dt = None
+            return False
+
+    def trigger_inspection(self, metadata: dict, now: Optional[datetime] = None) -> None:
+        """Explicitly open or extend an inspection window with the given sensor metadata."""
+        if now is None:
+            now = datetime.now(SGT)
+        with self._lock:
+            self._inspection_expiry_dt = now + timedelta(seconds=self.inspection_window_sec)
+            meta = dict(metadata)
+            meta["inspection_active"] = True
+            self.latest_sensor_metadata = meta
 
     def process_line(self, line: str, now: Optional[datetime] = None) -> Optional[dict]:
         """Process one serial line. Returns the event dict when an alert fires
@@ -121,13 +152,19 @@ class SensorBridge:
         if data is None:
             return None
 
-        motion = bool(data.get("motion"))
-        pir_ready = bool(data.get("pir_ready"))
+        motion = bool(data.get("motion", data.get("pir")))
+        pir_ready = bool(data.get("pir_ready", True))
+        distance_change = float(data.get("distance_change_cm") or 0.0)
+        object_close = bool(data.get("object_close"))
 
-        # Rising edge only: alert on the transition into motion, never on every
-        # line and never on continuous motion.
-        rising = motion and not self._prev_motion
+        # Rising edge or ultrasonic distance change
+        pir_rising = motion and not self._prev_motion
+        ultrasonic_rising = (distance_change > 15.0 or (object_close and not self._prev_object_close))
+        rising = pir_rising or ultrasonic_rising
+
         self._prev_motion = motion
+        self._prev_object_close = object_close
+
         if not rising:
             return None
 
@@ -136,15 +173,40 @@ class SensorBridge:
             return None
 
         # Only inside the configured restricted hours (Singapore time).
-        if not in_restricted_hours(now, self.hours_start, self.hours_end):
+        restricted = in_restricted_hours(now, self.hours_start, self.hours_end)
+        after_hours = data.get("after_hours")
+        if after_hours is None:
+            after_hours = restricted
+        if not restricted:
             return None
+
+        trigger_type = "PIR" if pir_rising else "ULTRASONIC"
+        if data.get("trigger"):
+            trigger_type = str(data.get("trigger"))
+
+        sensor_metadata = {
+            "pir": motion,
+            "motion": motion,
+            "pir_ready": pir_ready,
+            "distance_cm": data.get("distance_cm"),
+            "baseline_distance_cm": data.get("baseline_distance_cm"),
+            "distance_change_cm": data.get("distance_change_cm"),
+            "object_close": object_close,
+            "trigger": trigger_type,
+            "inspection_active": True,
+            "after_hours": bool(after_hours),
+            "uptime_ms": data.get("uptime_ms"),
+        }
+
+        # Activate bounded inspection window
+        self.trigger_inspection(sensor_metadata, now=now)
 
         # Cooldown between motion alerts.
         if self._last_alert_dt is not None and (now - self._last_alert_dt).total_seconds() < self.cooldown_sec:
             return None
 
         self._last_alert_dt = now
-        event = self._build_event(data, now)
+        event = self._build_event(data, now, sensor_metadata=sensor_metadata)
         if self.dry_run:
             print(json.dumps(event))
             self.log.info("[SensorBridge] DRY-RUN restricted-motion event (not sent).")
@@ -153,15 +215,14 @@ class SensorBridge:
             self.log.warning("[SensorBridge] RESTRICTED-ZONE MOTION queued for %s.", self.zone_name)
         return event
 
-    def _build_event(self, data: dict, now: datetime) -> dict:
-        # Distance/object_close/pir_ready ride along as metadata only — never used
-        # to claim an object class or an item pick-up/set-down.
-        sensor_metadata = {
-            "distance_cm": data.get("distance_cm"),
-            "object_close": data.get("object_close"),
-            "pir_ready": data.get("pir_ready"),
-            "uptime_ms": data.get("uptime_ms"),
-        }
+    def _build_event(self, data: dict, now: datetime, sensor_metadata: Optional[dict] = None) -> dict:
+        if sensor_metadata is None:
+            sensor_metadata = {
+                "distance_cm": data.get("distance_cm"),
+                "object_close": data.get("object_close"),
+                "pir_ready": data.get("pir_ready"),
+                "uptime_ms": data.get("uptime_ms"),
+            }
         event_id = build_event_id(self.device_id, "restricted_motion", "pir", now)
         if self.client is not None:
             return self.client.build_event(
@@ -217,6 +278,44 @@ class SensorBridge:
             if self.client is not None:
                 self.client.stop(wait=True)
             self.log.info("[SensorBridge] Stopped.")
+
+
+def start_sensor_reader_thread(
+    bridge: SensorBridge,
+    serial_port: str,
+    baud: int = 9600,
+    stop_event: Optional[threading.Event] = None,
+) -> Optional[threading.Thread]:
+    """Launch a background daemon thread reading Arduino serial lines into ``bridge``.
+    Defensive against serial reconnects and port absence."""
+    def _reader_loop():
+        try:
+            import serial
+        except ImportError:
+            LOGGER.warning("[SensorBridgeThread] pyserial not available — serial bridge disabled.")
+            return
+
+        LOGGER.info("[SensorBridgeThread] Background serial reader starting on %s @ %d baud.", serial_port, baud)
+        while stop_event is None or not stop_event.is_set():
+            try:
+                if not os.path.exists(serial_port) and not serial_port.startswith("COM"):
+                    time.sleep(2.0)
+                    continue
+                with serial.Serial(serial_port, baud, timeout=1) as ser:
+                    while stop_event is None or not stop_event.is_set():
+                        raw = ser.readline()
+                        if not raw:
+                            continue
+                        line = raw.decode("utf-8", errors="replace").strip()
+                        if line:
+                            bridge.process_line(line)
+            except Exception as exc:
+                LOGGER.debug("[SensorBridgeThread] Serial read retry after error: %s", exc)
+                time.sleep(2.0)
+
+    thread = threading.Thread(target=_reader_loop, name="securepi-sensor-reader", daemon=True)
+    thread.start()
+    return thread
 
 
 def _default_serial_port(env=None) -> Optional[str]:

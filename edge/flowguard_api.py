@@ -321,6 +321,8 @@ class FlowGuardApiClient:
         device_id: Optional[str] = None,
         track_id=None,
         person_name: Optional[str] = None,
+        identity_status: Optional[str] = None,
+        person_role: Optional[str] = None,
         timestamp=None,
         first_alert_timestamp=None,
         sensor_metadata: Optional[dict] = None,
@@ -337,6 +339,7 @@ class FlowGuardApiClient:
 
         payload = {
             "event_id": eid,
+            "event_type": event_type,
             "zone_name": zone_name,
             "camera_location": cam,
             "alert_type": alert_type,
@@ -349,6 +352,8 @@ class FlowGuardApiClient:
             "device_id": dev,
             "track_id": track_id,
             "person_name": person_name,
+            "identity_status": identity_status,
+            "person_role": person_role,
             "sensor_metadata": sensor_metadata,
             "timestamp": iso_utc(timestamp),
         }

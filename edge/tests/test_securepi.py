@@ -23,11 +23,13 @@ sys.path.insert(0, str(PROJECT_ROOT))
 _draw_calls = []
 _cv2 = types.SimpleNamespace(
     imwrite=lambda path, img: Path(path).write_bytes(b"jpg") > 0,
+    imencode=lambda ext, img, params=None: (True, b"jpg"),
     rectangle=lambda frame, p1, p2, color, thickness: _draw_calls.append(
         ("rect", p1, p2, color, thickness)),
     putText=lambda frame, text, org, font, scale, color, thickness: _draw_calls.append(
         ("text", text, color)),
     FONT_HERSHEY_SIMPLEX=0,
+    IMWRITE_JPEG_QUALITY=1,
 )
 sys.modules.setdefault("cv2", _cv2)
 

@@ -88,8 +88,52 @@ except ImportError:  # pragma: no cover - integration is optional
     mask_url = None  # type: ignore[assignment]
     _FLOWGUARD_AVAILABLE = False
 
+try:
+    from sensor_bridge import SensorBridge, start_sensor_reader_thread, _default_serial_port
+    _SENSOR_BRIDGE_AVAILABLE = True
+except ImportError:
+    try:
+        from edge.sensor_bridge import SensorBridge, start_sensor_reader_thread, _default_serial_port
+        _SENSOR_BRIDGE_AVAILABLE = True
+    except ImportError:
+        SensorBridge = None  # type: ignore[assignment]
+        start_sensor_reader_thread = None  # type: ignore[assignment]
+        _default_serial_port = lambda: None  # type: ignore[assignment]
+        _SENSOR_BRIDGE_AVAILABLE = False
+
 
 LOGGER = logging.getLogger("securepi")
+
+
+def _enqueue_flowguard(client, config, *, event_type, alert_type, object_class,
+                       confidence, duration_seconds, track_id, snapshot_path, event_id,
+                       person_name=None, identity_status=None, person_role=None,
+                       severity=None, sensor_metadata=None):
+    """Best-effort push of a detection event to the FlowGuard outbox (non-blocking)."""
+    if client is None or not getattr(client, "enabled", False):
+        return
+    try:
+        zone_name, camera_location = _flowguard_zone_camera(client, config)
+        event = client.build_event(
+            event_type=event_type,
+            alert_type=alert_type,
+            zone_name=zone_name,
+            camera_location=camera_location,
+            object_class=object_class,
+            severity=severity,
+            confidence=confidence,
+            duration_seconds=duration_seconds,
+            track_id=track_id,
+            person_name=person_name,
+            identity_status=identity_status,
+            person_role=person_role,
+            sensor_metadata=sensor_metadata,
+            snapshot_path=str(snapshot_path) if snapshot_path else None,
+            event_id=event_id,
+        )
+        client.enqueue_event(event)
+    except Exception as exc:  # pragma: no cover - defensive; cloud must not break local
+        LOGGER.warning("FlowGuard enqueue failed (non-fatal): %s", exc)
 
 # Repo root = the folder that contains edge/. Used to resolve preset/model/label
 # and runtime paths reliably regardless of the current working directory.
@@ -949,35 +993,45 @@ def _flowguard_zone_camera(client: "FlowGuardApiClient", config: Config) -> tupl
     return zone_name, camera_location
 
 
-def _enqueue_flowguard(client, config, *, event_type, alert_type, object_class,
-                       confidence, duration_seconds, track_id, snapshot_path, event_id):
-    """Best-effort push of a detection event to the FlowGuard outbox (non-blocking).
+def _fire_sensor_person_alert(frame, person, identity_info: dict, sensor_metadata: dict,
+                              config: Config, now: float, renderer: "Renderer", *, client=None) -> None:
+    """Fire a Restricted-Zone Motion alert when a person is detected during sensor inspection."""
+    person_id = person.person_id
+    identity_status = identity_info.get("identity_status", "UNAVAILABLE")
+    person_name = identity_info.get("person_name")
+    person_role = identity_info.get("person_role")
+    conf = identity_info.get("confidence") or getattr(person, "score", None)
 
-    NEVER raises and NEVER performs network I/O on the caller's thread — it only
-    writes a local outbox file and pokes the background worker. A cloud problem
-    must never break local snapshot capture, CSV logging or detection. Severity is
-    intentionally omitted so the FlowGuard backend applies its own type/duration
-    policy (pest -> High, unattended -> duration-based)."""
-    if client is None or not getattr(client, "enabled", False):
-        return
-    try:
-        zone_name, camera_location = _flowguard_zone_camera(client, config)
-        event = client.build_event(
-            event_type=event_type,
-            alert_type=alert_type,
-            zone_name=zone_name,
-            camera_location=camera_location,
-            object_class=object_class,
-            confidence=confidence,
-            duration_seconds=duration_seconds,
-            track_id=track_id,
-            # A local Pi path — the backend records it but never renders it as a URL.
-            snapshot_path=str(snapshot_path) if snapshot_path else None,
+    severity = "Critical" if identity_status in ("SUSPICIOUS", "SUSPENDED") else "High"
+
+    LOGGER.warning("RESTRICTED-ZONE MOTION - person #%d (%s - %s)",
+                   person_id, person_name or "Unknown", identity_status)
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    snapshot_path = save_snapshot(frame, config, f"sensor_person_{person_id}_{stamp}.jpg")
+
+    log_event(config, event_type="restricted_motion", label="person",
+              confidence=conf, track_id=person_id,
+              duration_sec=None, snapshot=snapshot_path.name)
+
+    if client is not None and getattr(client, "enabled", False) and build_event_id is not None:
+        event_id = build_event_id(client.device_id, "restricted_motion", person_id, time.time())
+        _enqueue_flowguard(
+            client, config,
+            event_type="restricted_motion",
+            alert_type="Restricted-Zone Motion",
+            object_class="person",
+            confidence=conf,
+            duration_seconds=None,
+            track_id=person_id,
+            snapshot_path=snapshot_path,
             event_id=event_id,
+            person_name=person_name,
+            identity_status=identity_status,
+            person_role=person_role,
+            severity=severity,
+            sensor_metadata=sensor_metadata,
         )
-        client.enqueue_event(event)
-    except Exception as exc:  # pragma: no cover - defensive; cloud must not break local
-        LOGGER.warning("FlowGuard enqueue failed (non-fatal): %s", exc)
 
 
 def _fire_alert(frame, bag: TrackedBag, config: Config, now: float,
@@ -1171,7 +1225,7 @@ class _StreamHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 
 
 class StreamServer:
-    """Embedded HTTP server exposing /health and the /video_feed MJPEG stream.
+    """Embedded HTTP server exposing /health, /video_feed, /people-count, and /snapshot.
 
     Lives inside the SecurePi process in a background thread and serves only
     frames the detection loop has already annotated and published to a
@@ -1180,9 +1234,9 @@ class StreamServer:
     disconnecting client can only ever kill its own handler thread.
     """
 
-    def __init__(self, config: Config, buffer: FrameBuffer) -> None:
+    def __init__(self, config: Config, buffer: FrameBuffer, state_provider: Optional[Callable] = None) -> None:
         self._stop_event = threading.Event()
-        handler = self._make_handler(buffer, self._stop_event)
+        handler = self._make_handler(buffer, self._stop_event, state_provider)
         self._httpd = _StreamHTTPServer((config.stream_host, config.stream_port),
                                         handler)
         self._thread = threading.Thread(target=self._httpd.serve_forever,
@@ -1202,7 +1256,7 @@ class StreamServer:
         self._thread.join(timeout=5.0)
 
     @staticmethod
-    def _make_handler(buffer: FrameBuffer, stop_event: threading.Event):
+    def _make_handler(buffer: FrameBuffer, stop_event: threading.Event, state_provider: Optional[Callable] = None):
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, fmt: str, *args) -> None:
                 LOGGER.debug("HTTP %s %s", self.address_string(), fmt % args)
@@ -1218,6 +1272,10 @@ class StreamServer:
                         self._serve_health()
                     elif path == "/video_feed":
                         self._serve_video_feed()
+                    elif path == "/people-count":
+                        self._serve_people_count()
+                    elif path == "/snapshot":
+                        self._serve_snapshot()
                     else:
                         self.send_error(404, "Not Found")
                 except OSError:
@@ -1241,6 +1299,31 @@ class StreamServer:
                 self._common_headers()
                 self.end_headers()
                 self.wfile.write(body)
+
+            def _serve_people_count(self) -> None:
+                st = state_provider() if state_provider else {"count": 0, "detection_active": False}
+                body = json.dumps({
+                    "count": int(st.get("count", st.get("people_count", 0))),
+                    "detection_active": bool(st.get("detection_active", False)),
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self._common_headers()
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _serve_snapshot(self) -> None:
+                jpeg, _ = buffer.wait_for_frame(0, timeout=0.1)
+                if jpeg is None:
+                    self.send_error(503, "Service Unavailable")
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(jpeg)))
+                self._common_headers()
+                self.end_headers()
+                self.wfile.write(jpeg)
 
             def _serve_video_feed(self) -> None:
                 self.send_response(200)
@@ -1282,7 +1365,7 @@ def _check_flowguard_connectivity(client: "FlowGuardApiClient", timeout: float =
         LOGGER.warning("[FlowGuard] NOT REACHABLE -> %s (%s)", label, exc)
 
 
-def run(config: Config, client=None) -> None:
+def run(config: Config, client=None, sensor_bridge=None) -> None:
     detector = IMX500Detector(config)
 
     # Make sure the runtime tree exists up-front so operators can find it even
@@ -1297,15 +1380,19 @@ def run(config: Config, client=None) -> None:
     else:
         LOGGER.info("[FlowGuard] Disabled (FLOWGUARD_EDGE_ENABLED not set) — running offline.")
 
+    # Initialize SensorBridge if not provided
+    if sensor_bridge is None and _SENSOR_BRIDGE_AVAILABLE and SensorBridge is not None:
+        zone = config.zone or "Restricted Zone"
+        sensor_bridge = SensorBridge(
+            client=client,
+            zone_name=zone,
+            camera_location=getattr(config, "camera_location", "Camera 01") or f"{zone} Camera",
+        )
+
     picam2 = Picamera2(detector.camera_num)
     controls = {}
     if detector.inference_rate:
         controls["FrameRate"] = detector.inference_rate
-    # RGB888 yields a 3-channel array in BGR order — exactly what OpenCV expects,
-    # so the preview and saved snapshots have correct colours.
-    # buffer_count: enough to ride out processing hiccups without queueing
-    # stale frames (each buffer is a full frame of CMA memory, and a deep
-    # queue means alerting on the past if the loop ever falls behind).
     cam_config = picam2.create_preview_configuration(
         main={"size": config.frame_size, "format": "RGB888"},
         controls=controls,
@@ -1322,13 +1409,19 @@ def run(config: Config, client=None) -> None:
     pest_tracker = PestTracker(config)
     renderer = Renderer(config)
 
+    current_visible_count = 0
+    state_provider = lambda: {
+        "count": current_visible_count,
+        "detection_active": sensor_bridge.is_inspection_active() if sensor_bridge else False,
+    }
+
     frame_buffer: Optional[FrameBuffer] = None
     stream_server: Optional[StreamServer] = None
     if config.stream_enabled:
         frame_buffer = FrameBuffer()
-        stream_server = StreamServer(config, frame_buffer)
+        stream_server = StreamServer(config, frame_buffer, state_provider=state_provider)
         stream_server.start()
-        LOGGER.info("MJPEG stream on http://%s:%d/video_feed (health: /health)",
+        LOGGER.info("MJPEG stream on http://%s:%d/video_feed (health: /health, telemetry: /people-count, snapshot: /snapshot)",
                     config.stream_host, stream_server.port)
     stream_interval = 1.0 / config.stream_fps
     next_publish = 0.0
@@ -1340,34 +1433,21 @@ def run(config: Config, client=None) -> None:
     prev = time.monotonic()
     last_flowguard_flush = time.monotonic()
     last_detection_log = 0.0
+    fired_sensor_person_alerts = set()
 
     try:
         while True:
-            # capture_request() keeps the frame and its detection metadata in
-            # sync. The request is held while tracking runs so the pixel copy
-            # (~1 MB per frame) can be skipped entirely on headless frames
-            # where no alert snapshot is due.
             request = picam2.capture_request()
             try:
                 metadata = request.get_metadata()
-
-                # Monotonic clock for all track/alert timing: the Pi has no
-                # RTC, so time.time() can jump hours when NTP syncs — which
-                # would instantly "expire" every unattended timer.
                 now = time.monotonic()
                 detections = detector.detect(metadata, picam2)
-                # Throttled to ~1/sec so the CLI stays readable at camera frame
-                # rate — visible at the default log level (no -v needed), so a
-                # headless/SSH session can see what the model is seeing live.
                 if detections and now - last_detection_log >= 1.0:
                     last_detection_log = now
                     summary = ", ".join(f"{d.label}({d.score:.2f})" for d in detections)
                     LOGGER.info("Detected: %s", summary)
                 person_dets, bag_dets, pest_dets = split_detections(detections, config)
 
-                # Track people first (for stable ids), then bags (which need those ids
-                # to recognise their owner). Pass all live person tracks — including ones
-                # coasting through a brief miss — so the owner isn't lost to a blip.
                 person_tracker.update(person_dets, now)
                 person_tracker.prune(now)
                 persons = list(person_tracker.tracks.values())
@@ -1375,7 +1455,6 @@ def run(config: Config, client=None) -> None:
                 tracker.update(bag_dets, persons, now)
                 tracker.prune(now)
 
-                # Pests are entirely separate: no owner, own confirmation/cooldown.
                 pest_tracker.update(pest_dets, now)
                 pest_tracker.prune(now)
 
@@ -1383,8 +1462,6 @@ def run(config: Config, client=None) -> None:
                                   if _alert_due(b, config, now)]
                 pest_alerts_due = [p for p in pest_tracker.pests.values()
                                    if _pest_alert_due(p, config, now)]
-                # Publish to the stream at --stream-fps, not at camera rate:
-                # JPEG-encoding every frame would burn CPU no client can use.
                 stream_due = stream_server is not None and now >= next_publish
                 frame = (request.make_array("main")
                          if not config.headless or bag_alerts_due or pest_alerts_due or stream_due
@@ -1398,21 +1475,36 @@ def run(config: Config, client=None) -> None:
                 inst = 1.0 / dt
                 fps = inst if fps == 0.0 else 0.9 * fps + 0.1 * inst
 
-            # Drawing happens BEFORE the alerts fire so snapshots carry the
-            # full annotations. frame is None only on headless frames with no
-            # alert due, which need no drawing at all.
             if frame is not None:
                 owner_ids = {b.owner_id for b in tracker.bags.values()
                              if b.owner_id is not None}
                 visible_persons = 0
+                inspection_active = sensor_bridge.is_inspection_active() if sensor_bridge else False
+                sensor_meta = sensor_bridge.latest_sensor_metadata if (sensor_bridge and inspection_active) else {}
+
                 for person in persons:
                     if now - person.last_seen > config.draw_grace_sec:
-                        continue  # don't draw a coasting person's stale box
+                        continue
                     visible_persons += 1
                     tag = " (owner)" if person.person_id in owner_ids else ""
-                    face_label = _recognize_person_with_flowguard(frame, person.box, person.person_id)
-                    display_name = face_label or f"Person #{person.person_id}"
-                    renderer.draw_box(frame, person.box, COLOR_PERSON, f"{display_name}{tag}")
+                    face_info = _recognize_person_with_flowguard(frame, person.box, person.person_id)
+
+                    if isinstance(face_info, dict):
+                        display_label = face_info.get("display_label", f"#{person.person_id} Person")
+                    else:
+                        display_label = face_info or f"#{person.person_id} Person"
+
+                    renderer.draw_box(frame, person.box, COLOR_PERSON, f"{display_label}{tag}")
+
+                    if inspection_active and isinstance(face_info, dict):
+                        expiry = getattr(sensor_bridge, "_inspection_expiry_dt", None)
+                        alert_key = (person.person_id, expiry)
+                        if alert_key not in fired_sensor_person_alerts:
+                            fired_sensor_person_alerts.add(alert_key)
+                            _fire_sensor_person_alert(frame, person, face_info, sensor_meta,
+                                                       config, now, renderer, client=client)
+
+                current_visible_count = visible_persons
                 for bag in tracker.bags.values():
                     renderer.handle_bag(frame, bag, now)
                 for pest in pest_tracker.pests.values():
@@ -1700,23 +1792,39 @@ def _merge_class_confidence(pairs: list[str], base: dict[str, float]) -> dict[st
     return merged
 
 
-_FACE_NAME_CACHE = {}
+_FACE_INFO_CACHE = {}
 _FACE_LAST_CHECK = {}
 _FACE_CHECK_INTERVAL_SEC = 3.0
 
 
+def reset_face_cache() -> None:
+    """Clear cached facial recognition results (for tests)."""
+    _FACE_INFO_CACHE.clear()
+    _FACE_LAST_CHECK.clear()
+
+
 def _recognize_person_with_flowguard(frame, box, person_id):
-    """Call FlowGuard facial recognition and cache name per SecurePi person track."""
+    """Call FlowGuard facial recognition and cache structured identity info per SecurePi person track."""
     api_url = os.environ.get("FLOWGUARD_API_URL", "").rstrip("/")
     edge_token = os.environ.get("EDGE_SERVICE_TOKEN", "")
 
-    if not api_url or not edge_token:
-        return None
-
     now = time.monotonic()
+    cached = _FACE_INFO_CACHE.get(person_id)
     last_check = _FACE_LAST_CHECK.get(person_id, 0)
-    if now - last_check < _FACE_CHECK_INTERVAL_SEC:
-        return _FACE_NAME_CACHE.get(person_id)
+
+    if cached and (now - last_check < _FACE_CHECK_INTERVAL_SEC):
+        return cached
+
+    if not api_url or not edge_token:
+        info = {
+            "identity_status": "UNAVAILABLE",
+            "person_name": None,
+            "person_role": None,
+            "confidence": None,
+            "display_label": f"#{person_id} Identity unavailable",
+        }
+        _FACE_INFO_CACHE[person_id] = info
+        return info
 
     _FACE_LAST_CHECK[person_id] = now
 
@@ -1730,11 +1838,23 @@ def _recognize_person_with_flowguard(frame, box, person_id):
 
     crop = frame[y1:y2, x1:x2]
     if crop.size == 0:
-        return _FACE_NAME_CACHE.get(person_id)
+        return cached or {
+            "identity_status": "UNAVAILABLE",
+            "person_name": None,
+            "person_role": None,
+            "confidence": None,
+            "display_label": f"#{person_id} Identity unavailable",
+        }
 
     ok, buffer = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
     if not ok:
-        return _FACE_NAME_CACHE.get(person_id)
+        return cached or {
+            "identity_status": "UNAVAILABLE",
+            "person_name": None,
+            "person_role": None,
+            "confidence": None,
+            "display_label": f"#{person_id} Identity unavailable",
+        }
 
     image_b64 = base64.b64encode(buffer).decode("ascii")
     payload = json.dumps({
@@ -1753,26 +1873,70 @@ def _recognize_person_with_flowguard(frame, box, person_id):
     )
 
     try:
+        LOGGER.debug("[Face] track #%s recognition requested", person_id)
         with urllib.request.urlopen(request, timeout=5) as response:
             data = json.loads(response.read().decode("utf-8"))
-    except Exception:
-        return _FACE_NAME_CACHE.get(person_id)
+    except Exception as exc:
+        LOGGER.warning("[Face] track #%s recognition service unavailable: %s", person_id, exc)
+        info = {
+            "identity_status": "UNAVAILABLE",
+            "person_name": None,
+            "person_role": None,
+            "confidence": None,
+            "display_label": f"#{person_id} Identity unavailable",
+        }
+        _FACE_INFO_CACHE[person_id] = info
+        return info
 
     user = data.get("user") or {}
     name = user.get("name")
     status = user.get("status")
-    confidence = user.get("confidence")
+    role = user.get("role") or user.get("person_role")
+    conf = user.get("confidence")
+    try:
+        conf_float = float(conf) if conf is not None else None
+    except (ValueError, TypeError):
+        conf_float = None
 
-    if name and status == "AUTHORIZED":
-        label = f"{name} {float(confidence or 0):.2f}"
-        _FACE_NAME_CACHE[person_id] = label
-        return label
+    if status == "AUTHORIZED" and name and name != "Unknown Person":
+        info = {
+            "identity_status": "VERIFIED",
+            "person_name": name,
+            "person_role": role or "Staff",
+            "confidence": conf_float,
+            "display_label": f"#{person_id} {name} - VERIFIED",
+        }
+        LOGGER.info("[Face] track #%s VERIFIED name=%s confidence=%s", person_id, name, conf_float)
+    elif status == "SUSPENDED" and name:
+        info = {
+            "identity_status": "SUSPENDED",
+            "person_name": name,
+            "person_role": role or "Staff",
+            "confidence": conf_float,
+            "display_label": f"#{person_id} {name} - SUSPENDED",
+        }
+        LOGGER.info("[Face] track #%s SUSPENDED name=%s", person_id, name)
+    elif status == "DENIED" or name == "Unknown Person":
+        info = {
+            "identity_status": "SUSPICIOUS",
+            "person_name": "Unknown Person",
+            "person_role": None,
+            "confidence": conf_float,
+            "display_label": f"#{person_id} Unknown Person - SUSPICIOUS",
+        }
+        LOGGER.info("[Face] track #%s SUSPICIOUS / Unknown Person", person_id)
+    else:
+        info = {
+            "identity_status": "SUSPICIOUS",
+            "person_name": "Unknown Person",
+            "person_role": None,
+            "confidence": conf_float,
+            "display_label": f"#{person_id} Unknown Person - SUSPICIOUS",
+        }
+        LOGGER.info("[Face] track #%s mapped status=%s name=%s -> SUSPICIOUS", person_id, status, name)
 
-    if name == "Unknown Person":
-        _FACE_NAME_CACHE[person_id] = "Unknown Person"
-        return "Unknown Person"
-
-    return _FACE_NAME_CACHE.get(person_id)
+    _FACE_INFO_CACHE[person_id] = info
+    return info
 
 
 def main(argv=None) -> None:
@@ -1782,6 +1946,10 @@ def main(argv=None) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%H:%M:%S",
     )
+    edge_service_tok = os.environ.get("EDGE_SERVICE_TOKEN")
+    edge_ingest_tok = os.environ.get("EDGE_INGEST_TOKEN")
+    LOGGER.info("[FlowGuard] Facial recognition token: %s", "configured" if edge_service_tok else "missing")
+    LOGGER.info("[FlowGuard] Edge alert ingest token: %s", "configured" if edge_ingest_tok else "missing")
     config = Config(
         unattended_time_sec=args.unattended_time,
         stationary_radius=args.stationary_radius,
