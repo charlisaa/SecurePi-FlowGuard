@@ -150,7 +150,12 @@ class Config:
     # No "suitcase" entry: IMX500Detector.detect() remaps every "suitcase"
     # prediction to "backpack" right after classification (the class
     # confidently misfires on backpacks/handbags - see docs/MODELS.md), so a
-    # detection can never carry that label here. mouse is raised on direct
+    # detection can never carry that label here. backpack is raised to the
+    # same 0.55 the old "suitcase" entry used - without it, the remapped
+    # noisy detections only have to clear the flat 0.5 min_confidence floor,
+    # which is what let them flood in as spurious backpack alerts (confirmed
+    # in runtime/logs/events.csv: backpack alerts landing right at 0.53-0.56,
+    # the exact range 0.55 used to filter out). mouse is raised on direct
     # evidence from a real deployment log (runtime/logs/events.csv): it
     # repeatedly triggered right at the old flat 0.5 floor (scores as low as
     # 0.44-0.56), consistent with noisy, borderline detections being fed to
@@ -159,6 +164,7 @@ class Config:
     # was trained on Hamster images, never a real rat -- see docs/MODELS.md),
     # which no confidence threshold can fix.
     class_confidence: dict[str, float] = field(default_factory=lambda: {
+        "backpack": 0.55,
         "mouse": 0.55,
     })
     box_smoothing: float = 0.6           # weight of the newest detection when smoothing a
