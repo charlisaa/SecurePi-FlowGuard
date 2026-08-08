@@ -201,6 +201,33 @@ def test_dedup_cross_label_detections():
     assert any(d.label == "suitcase" for d in kept)
 
 
+def test_new_bag_track_needs_confirm_margin():
+    """A single detection just above the sustain floor but below the create
+    bar (min_confidence + new_track_confidence_margin) must not spawn a track
+    -- it's the noisy-single-frame case the margin exists to reject."""
+    bt = BagTracker(CFG)
+    create_bar = CFG.confidence_for("backpack", CFG.min_confidence) + CFG.new_track_confidence_margin
+    bt.update([Detection("backpack", create_bar - 0.01, (100, 100, 40, 40))], [], now=0.0)
+    assert len(bt.bags) == 0
+
+
+def test_existing_bag_track_sustained_below_create_bar():
+    """Once a track exists, a later detection only needs to clear the lower
+    sustain floor to keep updating it -- the higher create bar only gates
+    spawning a brand-new track, so a real bag that dips in confidence isn't
+    dropped."""
+    bt = BagTracker(CFG)
+    bt.update([Detection("backpack", 0.9, (100, 100, 40, 40))], [], now=0.0)
+    assert len(bt.bags) == 1
+
+    create_bar = CFG.confidence_for("backpack", CFG.min_confidence) + CFG.new_track_confidence_margin
+    sustain_floor = CFG.confidence_for("backpack", CFG.min_confidence)
+    dipped_score = (sustain_floor + create_bar) / 2  # clears sustain, not create
+    bt.update([Detection("backpack", dipped_score, (104, 102, 40, 40))], [], now=0.1)
+    assert len(bt.bags) == 1                          # still the same track, not dropped
+    assert bt.bags[0].score == dipped_score
+
+
 def test_duplicate_bag_detections_one_track():
     bt = BagTracker(CFG)
     bt.update([Detection("backpack", 0.7, (100, 100, 40, 40)),

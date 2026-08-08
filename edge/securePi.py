@@ -160,6 +160,13 @@ DEFAULT_RUNTIME_DIR = REPO_ROOT / "runtime"
 # Global executor for non-blocking snapshot saving / event logging.
 SNAPSHOT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
+# Global executor for FlowGuard facial-recognition HTTP calls. Separate from
+# SNAPSHOT_EXECUTOR (which must stay free for fast disk writes) since a stalled
+# FlowGuard backend can leave a request in flight for the full request timeout.
+# Single worker (like SNAPSHOT_EXECUTOR): keeps at most one HTTP round trip in
+# flight, which also makes draining it in tests deterministic (FIFO).
+FACE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
 # BGR colours (OpenCV order).
 COLOR_PERSON = (0, 255, 0)
 COLOR_ATTENDED = (255, 255, 0)
@@ -214,6 +221,16 @@ class Config:
         "backpack": 0.55,
         "mouse": 0.55,
     })
+    new_track_confidence_margin: float = 0.15  # extra score, on top of a bag label's usual
+                                         # threshold, required to START a brand-new bag
+                                         # track (BagTracker._register). A single noisy
+                                         # detection can no longer spawn a fake box on its
+                                         # own, but once a real bag has a track, a later
+                                         # frame only needs the normal (lower) threshold to
+                                         # keep updating it -- so a genuine object that dips
+                                         # in confidence for a frame or two isn't dropped.
+                                         # A flat threshold can't cut both false positives
+                                         # and misses at once; this can.
     box_smoothing: float = 0.6           # weight of the newest detection when smoothing a
                                          # track's drawn box (1.0 = no smoothing); damps
                                          # frame-to-frame detector jitter on static objects
@@ -762,6 +779,12 @@ class BagTracker:
         for di, det in enumerate(bag_detections):
             bag = matches.get(di)
             if bag is None:
+                create_threshold = (self.config.confidence_for(det.label, self.config.min_confidence)
+                                    + self.config.new_track_confidence_margin)
+                if det.score < create_threshold:
+                    # Not confident enough to START a track from scratch; a real bag
+                    # will clear this bar on a later frame instead of flickering in now.
+                    continue
                 bag = self._register(det, now)
             else:
                 bag.box = smooth_box(bag.box, det.box, self.config.box_smoothing)
@@ -1727,6 +1750,12 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "--pest-confidence (pest labels), e.g. "
                         "--class-confidence backpack=0.55 mouse=0.45. Repeat to set "
                         f"multiple labels (built-in overrides: {d.class_confidence}).")
+    p.add_argument("--new-track-confidence-margin", type=float,
+                   default=d.new_track_confidence_margin,
+                   help="Extra confidence, on top of a bag label's usual threshold, "
+                        "required to start a brand-new bag track (default: %(default)s). "
+                        "Raise it if single noisy frames spawn fake boxes; lower it if "
+                        "real bags take too long to appear.")
     p.add_argument("--box-smoothing", type=float, default=d.box_smoothing,
                    help="Weight of the newest detection when smoothing drawn boxes, "
                         "0..1 (default: %(default)s). Lower = steadier boxes on static "
@@ -1862,71 +1891,36 @@ def _merge_class_confidence(pairs: list[str], base: dict[str, float]) -> dict[st
 _FACE_INFO_CACHE = {}
 _FACE_LAST_CHECK = {}
 _FACE_CHECK_INTERVAL_SEC = 3.0
+_FACE_PENDING: set = set()  # person_ids with a recognition request in flight on FACE_EXECUTOR
 
 
 def reset_face_cache() -> None:
     """Clear cached facial recognition results (for tests)."""
     _FACE_INFO_CACHE.clear()
     _FACE_LAST_CHECK.clear()
+    _FACE_PENDING.clear()
 
 
-def _recognize_person_with_flowguard(frame, box, person_id):
-    """Call FlowGuard facial recognition and cache structured identity info per SecurePi person track."""
-    api_url = os.environ.get("FLOWGUARD_API_URL", "").rstrip("/")
-    edge_token = os.environ.get("EDGE_SERVICE_TOKEN", "")
+def _face_unavailable(person_id, reason: str = "unavailable") -> dict:
+    return {
+        "identity_status": "UNAVAILABLE",
+        "person_name": None,
+        "person_role": None,
+        "confidence": None,
+        "display_label": f"#{person_id} Identity {reason}",
+    }
 
-    now = time.monotonic()
-    cached = _FACE_INFO_CACHE.get(person_id)
-    last_check = _FACE_LAST_CHECK.get(person_id, 0)
 
-    if cached and (now - last_check < _FACE_CHECK_INTERVAL_SEC):
-        return cached
+def _flowguard_recognize_worker(image_b64: str, person_id, camera_location: str,
+                                api_url: str, edge_token: str) -> None:
+    """Runs on FACE_EXECUTOR: the actual HTTP round trip, off the capture loop.
 
-    if not api_url or not edge_token:
-        info = {
-            "identity_status": "UNAVAILABLE",
-            "person_name": None,
-            "person_role": None,
-            "confidence": None,
-            "display_label": f"#{person_id} Identity unavailable",
-        }
-        _FACE_INFO_CACHE[person_id] = info
-        return info
-
-    _FACE_LAST_CHECK[person_id] = now
-
-    x, y, w, h = box
-    fh, fw = frame.shape[:2]
-
-    x1 = max(0, int(x))
-    y1 = max(0, int(y))
-    x2 = min(fw, int(x + w))
-    y2 = min(fh, int(y + h))
-
-    crop = frame[y1:y2, x1:x2]
-    if crop.size == 0:
-        return cached or {
-            "identity_status": "UNAVAILABLE",
-            "person_name": None,
-            "person_role": None,
-            "confidence": None,
-            "display_label": f"#{person_id} Identity unavailable",
-        }
-
-    ok, buffer = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
-    if not ok:
-        return cached or {
-            "identity_status": "UNAVAILABLE",
-            "person_name": None,
-            "person_role": None,
-            "confidence": None,
-            "display_label": f"#{person_id} Identity unavailable",
-        }
-
-    image_b64 = base64.b64encode(buffer).decode("ascii")
+    Writes its result straight into _FACE_INFO_CACHE; the main loop only ever
+    reads that cache, never waits on this call.
+    """
     payload = json.dumps({
         "image": f"data:image/jpeg;base64,{image_b64}",
-        "cameraLocation": os.environ.get("SECUREPI_CAMERA_LOCATION", "SecurePi Camera"),
+        "cameraLocation": camera_location,
     }).encode("utf-8")
 
     request = urllib.request.Request(
@@ -1945,15 +1939,9 @@ def _recognize_person_with_flowguard(frame, box, person_id):
             data = json.loads(response.read().decode("utf-8"))
     except Exception as exc:
         LOGGER.warning("[Face] track #%s recognition service unavailable: %s", person_id, exc)
-        info = {
-            "identity_status": "UNAVAILABLE",
-            "person_name": None,
-            "person_role": None,
-            "confidence": None,
-            "display_label": f"#{person_id} Identity unavailable",
-        }
-        _FACE_INFO_CACHE[person_id] = info
-        return info
+        _FACE_INFO_CACHE[person_id] = _face_unavailable(person_id)
+        _FACE_PENDING.discard(person_id)
+        return
 
     user = data.get("user") or {}
     name = user.get("name")
@@ -2003,7 +1991,57 @@ def _recognize_person_with_flowguard(frame, box, person_id):
         LOGGER.info("[Face] track #%s mapped status=%s name=%s -> SUSPICIOUS", person_id, status, name)
 
     _FACE_INFO_CACHE[person_id] = info
-    return info
+    _FACE_PENDING.discard(person_id)
+
+
+def _recognize_person_with_flowguard(frame, box, person_id):
+    """Return cached FlowGuard identity info for this person track.
+
+    Never blocks on the network: once the cache is stale, it dispatches a
+    fresh lookup to FACE_EXECUTOR and returns whatever's cached right now (or
+    a "pending" placeholder on the very first sighting). The real result
+    lands in _FACE_INFO_CACHE a frame or two later. Blocking here previously
+    stalled the whole capture loop for up to the request timeout every time a
+    person was in frame -- see _flowguard_recognize_worker for the actual call.
+    """
+    api_url = os.environ.get("FLOWGUARD_API_URL", "").rstrip("/")
+    edge_token = os.environ.get("EDGE_SERVICE_TOKEN", "")
+    cached = _FACE_INFO_CACHE.get(person_id)
+
+    if not api_url or not edge_token:
+        info = _face_unavailable(person_id)
+        _FACE_INFO_CACHE[person_id] = info
+        return info
+
+    now = time.monotonic()
+    last_check = _FACE_LAST_CHECK.get(person_id, 0)
+    if person_id in _FACE_PENDING or now - last_check < _FACE_CHECK_INTERVAL_SEC:
+        return cached or _face_unavailable(person_id, reason="pending")
+
+    x, y, w, h = box
+    fh, fw = frame.shape[:2]
+
+    x1 = max(0, int(x))
+    y1 = max(0, int(y))
+    x2 = min(fw, int(x + w))
+    y2 = min(fh, int(y + h))
+
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        return cached or _face_unavailable(person_id)
+
+    ok, buffer = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+    if not ok:
+        return cached or _face_unavailable(person_id)
+
+    _FACE_LAST_CHECK[person_id] = now
+    _FACE_PENDING.add(person_id)
+    image_b64 = base64.b64encode(buffer).decode("ascii")
+    camera_location = os.environ.get("SECUREPI_CAMERA_LOCATION", "SecurePi Camera")
+    FACE_EXECUTOR.submit(_flowguard_recognize_worker, image_b64, person_id,
+                         camera_location, api_url, edge_token)
+
+    return cached or _face_unavailable(person_id, reason="pending")
 
 
 def main(argv=None) -> None:
@@ -2025,6 +2063,7 @@ def main(argv=None) -> None:
         track_timeout_sec=args.timeout,
         min_confidence=args.min_confidence,
         class_confidence=_merge_class_confidence(args.class_confidence, Config().class_confidence),
+        new_track_confidence_margin=args.new_track_confidence_margin,
         box_smoothing=args.box_smoothing,
         headless=args.headless,
         alert_cooldown_sec=args.alert_cooldown,

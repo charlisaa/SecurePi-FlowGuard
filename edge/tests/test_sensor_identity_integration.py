@@ -61,12 +61,18 @@ from sensor_bridge import SensorBridge, in_restricted_hours, parse_sensor_line, 
 from securePi import (
     Config, Detection, PersonTracker, BagTracker, PestTracker,
     _recognize_person_with_flowguard, reset_face_cache, _fire_sensor_person_alert,
-    StreamServer, FrameBuffer
+    StreamServer, FrameBuffer, FACE_EXECUTOR
 )
 
 
 def DummyFrame():
     return np.zeros((480, 640, 3), dtype=np.uint8)
+
+
+def _drain_face():
+    """Block until FACE_EXECUTOR's single worker has flushed (recognition runs
+    off the calling thread now; tests need the result before asserting)."""
+    FACE_EXECUTOR.submit(lambda: None).result()
 
 
 # --------------------------------------------------------------------------
@@ -176,6 +182,9 @@ def test_6_7_8_9_10_identity_mappings_and_rate_limiting():
         mock_resp.__enter__.return_value = mock_resp
 
         with patch("urllib.request.urlopen", return_value=mock_resp) as mock_url:
+            pending = _recognize_person_with_flowguard(frame, box, person_id)
+            assert pending["identity_status"] == "UNAVAILABLE"  # dispatched, not resolved yet
+            _drain_face()
             info = _recognize_person_with_flowguard(frame, box, person_id)
             assert info["identity_status"] == "VERIFIED"
             assert info["person_name"] == "Felicia"
@@ -198,6 +207,8 @@ def test_6_7_8_9_10_identity_mappings_and_rate_limiting():
         mock_resp_denied.__enter__.return_value = mock_resp_denied
 
         with patch("urllib.request.urlopen", return_value=mock_resp_denied):
+            _recognize_person_with_flowguard(frame, box, 43)
+            _drain_face()
             info_denied = _recognize_person_with_flowguard(frame, box, 43)
             assert info_denied["identity_status"] == "SUSPICIOUS"
             assert info_denied["person_name"] == "Unknown Person"
@@ -212,6 +223,8 @@ def test_6_7_8_9_10_identity_mappings_and_rate_limiting():
         mock_resp_suspended.__enter__.return_value = mock_resp_suspended
 
         with patch("urllib.request.urlopen", return_value=mock_resp_suspended):
+            _recognize_person_with_flowguard(frame, box, 44)
+            _drain_face()
             info_suspended = _recognize_person_with_flowguard(frame, box, 44)
             assert info_suspended["identity_status"] == "SUSPENDED"
             assert info_suspended["person_name"] == "John Doe"
@@ -220,6 +233,8 @@ def test_6_7_8_9_10_identity_mappings_and_rate_limiting():
         # Reset cache for test 10 (Network error / Timeout -> UNAVAILABLE)
         reset_face_cache()
         with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Network Timeout")):
+            _recognize_person_with_flowguard(frame, box, 45)
+            _drain_face()
             info_unavail = _recognize_person_with_flowguard(frame, box, 45)
             assert info_unavail["identity_status"] == "UNAVAILABLE"
             assert info_unavail["person_name"] is None
