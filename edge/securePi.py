@@ -56,6 +56,7 @@ import threading
 import time
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Optional, Any
@@ -107,9 +108,18 @@ LOGGER = logging.getLogger("securepi")
 
 def _enqueue_flowguard(client, config, *, event_type, alert_type, object_class,
                        confidence, duration_seconds, track_id, snapshot_path, event_id,
+                       timestamp,
                        person_name=None, identity_status=None, person_role=None,
                        severity=None, sensor_metadata=None):
-    """Best-effort push of a detection event to the FlowGuard outbox (non-blocking)."""
+    """Best-effort push of a detection event to the FlowGuard outbox (non-blocking).
+
+    ``timestamp`` must be the ONE wall-clock value the caller already used for
+    this exact alert firing (snapshot filename, event_id derivation) -- never a
+    fresh ``datetime.now()`` read here, so the payload timestamp can never drift
+    from the evidence it describes. A retry resends the already-built event
+    dict verbatim (see FlowGuardApiClient.flush_outbox), so this value is never
+    recomputed for a retry either.
+    """
     if client is None or not getattr(client, "enabled", False):
         return
     try:
@@ -130,7 +140,10 @@ def _enqueue_flowguard(client, config, *, event_type, alert_type, object_class,
             sensor_metadata=sensor_metadata,
             snapshot_path=str(snapshot_path) if snapshot_path else None,
             event_id=event_id,
+            timestamp=timestamp,
         )
+        LOGGER.info("[SecurePi] %s event queued: %s", event_type, event_id)
+        LOGGER.info("[SecurePi] Alert timestamp: %s", event.get("timestamp"))
         client.enqueue_event(event)
     except Exception as exc:  # pragma: no cover - defensive; cloud must not break local
         LOGGER.warning("FlowGuard enqueue failed (non-fatal): %s", exc)
@@ -342,6 +355,12 @@ class PersonTrack:
     centroid: tuple[float, float]
     box: tuple[int, int, int, int]
     last_seen: float
+    # Stable restricted-motion cloud event id, scoped to one sensor inspection
+    # (mirrors TrackedBag.flowguard_event_id) -- reused across repeat sightings
+    # of the SAME inspection so a re-fire never mints a second cloud alert; a
+    # genuinely new inspection_id clears it and a fresh id gets built.
+    restricted_motion_event_id: Optional[str] = None
+    restricted_motion_inspection_id: Optional[str] = None
 
 
 @dataclass
@@ -944,13 +963,28 @@ def _pest_alert_due(pest: TrackedPest, config: Config, now: float) -> bool:
 
 
 def save_snapshot_worker(frame_copy, path: Path, directory: Path, keep: int) -> None:
-    if cv2.imwrite(str(path), frame_copy):
-        LOGGER.info("Saved alert snapshot: %s", path)
-    else:
-        LOGGER.error("Failed to save alert snapshot: %s", path)
+    """Write via a temp file + atomic rename so a concurrent reader (the FlowGuard
+    sender polling this exact path, see flowguard_api._wait_for_snapshot_file) can
+    never observe a partially-written JPEG -- the file only appears at its final
+    name once cv2.imwrite has fully finished writing it."""
+    tmp_path = path.with_name(path.name + ".tmp")
+    try:
+        ok = cv2.imwrite(str(tmp_path), frame_copy)
+        if ok:
+            os.replace(tmp_path, path)  # atomic on the same filesystem
+            LOGGER.info("Saved alert snapshot: %s", path)
+        else:
+            LOGGER.error("Failed to save alert snapshot: %s", path)
+    finally:
+        # No-op if the replace above already moved it away.
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
     try:
         # Cap the directory so an unattended deployment can't fill the SD card
-        # (a full card takes the whole Pi down, not just the snapshots).
+        # (a full card takes the whole Pi down, not just the snapshots). ".tmp"
+        # files never match "*.jpg" so an in-flight write is never pruned.
         snaps = sorted(directory.glob("*.jpg"), key=lambda f: f.stat().st_mtime)
         for old in snaps[:max(0, len(snaps) - keep)]:
             old.unlink()
@@ -965,6 +999,7 @@ def save_snapshot(frame, config: Config, filename: str) -> Path:
     path = config.snapshot_dir / filename
     SNAPSHOT_EXECUTOR.submit(save_snapshot_worker, frame.copy(), path,
                              config.snapshot_dir, config.max_snapshots)
+    LOGGER.info("[SecurePi] Snapshot queued: %s", filename)
     return path
 
 
@@ -1025,6 +1060,11 @@ def _flowguard_zone_camera(client: "FlowGuardApiClient", config: Config) -> tupl
 def _fire_sensor_person_alert(frame, person, identity_info: dict, sensor_metadata: dict,
                               config: Config, now: float, renderer: "Renderer", *, client=None) -> None:
     """Fire a Restricted-Zone Motion alert when a person is detected during sensor inspection."""
+    # ONE wall-clock read for this alert firing -- reused for the snapshot filename,
+    # any newly-minted event_id, and the FlowGuard payload timestamp. Never call
+    # time.time()/datetime.now() again below for this same occurrence.
+    trigger_ts = datetime.now(timezone.utc)
+
     person_id = person.person_id
     identity_status = identity_info.get("identity_status", "UNAVAILABLE")
     person_name = identity_info.get("person_name")
@@ -1036,7 +1076,7 @@ def _fire_sensor_person_alert(frame, person, identity_info: dict, sensor_metadat
     LOGGER.warning("RESTRICTED-ZONE MOTION - person #%d (%s - %s)",
                    person_id, person_name or "Unknown", identity_status)
 
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = trigger_ts.strftime("%Y%m%d-%H%M%S")
     snapshot_path = save_snapshot(frame, config, f"sensor_person_{person_id}_{stamp}.jpg")
 
     log_event(config, event_type="restricted_motion", label="person",
@@ -1044,7 +1084,22 @@ def _fire_sensor_person_alert(frame, person, identity_info: dict, sensor_metadat
               duration_sec=None, snapshot=snapshot_path.name)
 
     if client is not None and getattr(client, "enabled", False) and build_event_id is not None:
-        event_id = build_event_id(client.device_id, "restricted_motion", person_id, time.time())
+        # Stable occurrence id: the SAME sensor inspection + SAME person reuses one
+        # event_id, so an inspection extension (which bumps the caller's expiry-based
+        # dedup key without changing inspection_id) or a Wi-Fi retry never mints a
+        # second cloud alert for one physical occurrence. A genuinely new inspection
+        # (different inspection_id) gets a fresh id. Falls back to person_id alone
+        # when the sensor bridge hasn't supplied an inspection_id.
+        inspection_id = (sensor_metadata or {}).get("inspection_id")
+        cached_inspection_id = getattr(person, "restricted_motion_inspection_id", None)
+        cached_event_id = getattr(person, "restricted_motion_event_id", None)
+        if inspection_id and cached_inspection_id == inspection_id and cached_event_id:
+            event_id = cached_event_id
+        else:
+            track_key = f"{inspection_id}:{person_id}" if inspection_id else person_id
+            event_id = build_event_id(client.device_id, "restricted_motion", track_key, trigger_ts)
+            person.restricted_motion_event_id = event_id
+            person.restricted_motion_inspection_id = inspection_id
         _enqueue_flowguard(
             client, config,
             event_type="restricted_motion",
@@ -1055,6 +1110,7 @@ def _fire_sensor_person_alert(frame, person, identity_info: dict, sensor_metadat
             track_id=person_id,
             snapshot_path=snapshot_path,
             event_id=event_id,
+            timestamp=trigger_ts,
             person_name=person_name,
             identity_status=identity_status,
             person_role=person_role,
@@ -1065,6 +1121,10 @@ def _fire_sensor_person_alert(frame, person, identity_info: dict, sensor_metadat
 
 def _fire_alert(frame, bag: TrackedBag, config: Config, now: float,
                 renderer: "Renderer", *, client=None) -> None:
+    # ONE wall-clock read for this alert firing -- reused for the snapshot filename,
+    # any newly-minted event_id, and the FlowGuard payload timestamp.
+    trigger_ts = datetime.now(timezone.utc)
+
     bag.alerted = True
     bag.last_alert_time = now
     duration = int(now - bag.unattended_start)
@@ -1077,7 +1137,7 @@ def _fire_alert(frame, bag: TrackedBag, config: Config, now: float,
     renderer.draw_box(frame, bag.box, COLOR_ALERT,
                       f"ALERT! Bag #{bag.bag_id} unattended {duration}s",
                       thickness=3)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = trigger_ts.strftime("%Y%m%d-%H%M%S")
     snapshot_path = save_snapshot(frame, config, f"alert_bag{bag.bag_id}_{stamp}.jpg")
     # Preserve the specific detected class (backpack/handbag/suitcase) rather than a
     # generic "bag" — falls back to "bag" only when the track carries no class.
@@ -1086,20 +1146,26 @@ def _fire_alert(frame, bag: TrackedBag, config: Config, now: float,
               confidence=bag.score or None, track_id=bag.bag_id,
               duration_sec=duration, snapshot=snapshot_path.name)
     # One stable event_id per occurrence: computed on the FIRST alert and reused on
-    # every cooldown re-alert and Wi-Fi retry so the backend de-duplicates.
+    # every cooldown re-alert and Wi-Fi retry so the backend de-duplicates. The
+    # timestamp, however, is fresh on every firing (below) -- a cooldown re-alert
+    # is newer evidence of the SAME occurrence, not a retry of the first one.
     if client is not None and getattr(client, "enabled", False) and build_event_id is not None:
         if bag.flowguard_event_id is None:
             bag.flowguard_event_id = build_event_id(client.device_id, "unattended_object",
-                                                    bag.bag_id, time.time())
+                                                    bag.bag_id, trigger_ts)
         _enqueue_flowguard(client, config, event_type="unattended_object",
                            alert_type="Unattended Object", object_class=object_class,
                            confidence=bag.score or None, duration_seconds=duration,
                            track_id=bag.bag_id, snapshot_path=snapshot_path,
-                           event_id=bag.flowguard_event_id)
+                           event_id=bag.flowguard_event_id, timestamp=trigger_ts)
 
 
 def _fire_pest_alert(frame, pest: TrackedPest, config: Config, now: float,
                      renderer: "Renderer", *, client=None) -> None:
+    # ONE wall-clock read for this alert firing -- reused for the snapshot filename,
+    # any newly-minted event_id, and the FlowGuard payload timestamp.
+    trigger_ts = datetime.now(timezone.utc)
+
     pest.alerted = True
     pest.last_alert_time = now
     duration = now - pest.first_seen
@@ -1107,7 +1173,7 @@ def _fire_pest_alert(frame, pest: TrackedPest, config: Config, now: float,
                    pest.label, pest.pest_id, duration, pest.score)
     renderer.draw_box(frame, pest.box, COLOR_PEST,
                       f"PEST! {pest.label} #{pest.pest_id}", thickness=3)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = trigger_ts.strftime("%Y%m%d-%H%M%S")
     snapshot_path = save_snapshot(frame, config,
                                   f"pest_{pest.label}_{pest.pest_id}_{stamp}.jpg")
     log_event(config, event_type="pest", label=pest.label,
@@ -1115,15 +1181,18 @@ def _fire_pest_alert(frame, pest: TrackedPest, config: Config, now: float,
               duration_sec=duration, snapshot=snapshot_path.name)
     # The exact detected pest label (rat/mouse) rides through to FlowGuard — never
     # reduced to a generic term, never sent as an unattended-object alert_type.
+    # event_id stays stable for the SAME occurrence (like the bag path above);
+    # the timestamp is fresh on every firing -- a cooldown re-alert is newer
+    # evidence of the SAME occurrence, not a retry of the first one.
     if client is not None and getattr(client, "enabled", False) and build_event_id is not None:
         if pest.flowguard_event_id is None:
             pest.flowguard_event_id = build_event_id(client.device_id, "pest_detection",
-                                                     pest.pest_id, time.time())
+                                                     pest.pest_id, trigger_ts)
         _enqueue_flowguard(client, config, event_type="pest_detection",
                            alert_type="Pest Detection", object_class=pest.label,
                            confidence=pest.score or None, duration_seconds=None,
                            track_id=pest.pest_id, snapshot_path=snapshot_path,
-                           event_id=pest.flowguard_event_id)
+                           event_id=pest.flowguard_event_id, timestamp=trigger_ts)
 
 
 class Renderer:
@@ -1466,6 +1535,11 @@ def run(config: Config, client=None, sensor_bridge=None) -> None:
             camera_location=getattr(config, "camera_location", "Camera 01") or f"{zone} Camera",
             hours_start=getattr(config, "restricted_hours_start", os.environ.get("RESTRICTED_HOURS_START", "08:00")),
             hours_end=getattr(config, "restricted_hours_end", os.environ.get("RESTRICTED_HOURS_END", "23:00")),
+            # This process owns the authoritative, camera-confirmed DetectionAlert
+            # (_fire_sensor_person_alert below) for the same physical trigger --
+            # the embedded bridge must only feed it inspection state/telemetry,
+            # never send a second, unconfirmed alert of its own.
+            send_raw_alerts=False,
         )
 
     if sensor_bridge is not None and start_sensor_reader_thread:

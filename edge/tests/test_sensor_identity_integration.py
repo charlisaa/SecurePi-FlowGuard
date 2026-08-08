@@ -59,8 +59,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from flowguard_api import FlowGuardApiClient, build_event_id
 from sensor_bridge import SensorBridge, in_restricted_hours, parse_sensor_line, SGT
 from securePi import (
-    Config, Detection, PersonTracker, BagTracker, PestTracker,
+    Config, Detection, PersonTracker, BagTracker, PestTracker, PersonTrack, TrackedPest,
     _recognize_person_with_flowguard, reset_face_cache, _fire_sensor_person_alert,
+    _fire_alert, _fire_pest_alert,
     StreamServer, FrameBuffer, FACE_EXECUTOR
 )
 
@@ -318,6 +319,246 @@ def test_12_13_14_15_16_edge_alert_payload_and_idempotency():
 
         # Test 16: Snapshot path recorded
         assert "snapshot_path" in data
+
+
+# --------------------------------------------------------------------------
+# A1-7. Restricted-person snapshot + explicit timestamp + inspection-scoped
+# stable event_id (feature/sensor-identity-integration timestamp contract)
+# --------------------------------------------------------------------------
+
+def test_A_restricted_person_snapshot_timestamp_and_stable_event_id():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = FlowGuardApiClient(
+            api_url="http://mock-flowguard:5001", token="test-ingest-token", enabled=True,
+            device_id="securepi-bay1", camera_location="Loading Bay 01",
+            outbox_dir=Path(tmp) / "outbox", auto_flush=False,
+        )
+        cfg = Config(runtime_dir=Path(tmp))
+        cfg.snapshot_dir = Path(tmp) / "snapshots"
+        cfg.snapshot_dir.mkdir(parents=True, exist_ok=True)
+        renderer = MagicMock()
+
+        identity_info = {
+            "identity_status": "VERIFIED", "person_name": "Felicia",
+            "person_role": "Staff", "confidence": 0.91,
+        }
+        person = PersonTrack(person_id=7, centroid=(0.0, 0.0), box=(1, 1, 2, 2), last_seen=0.0)
+        sensor_meta_insp1 = {"inspection_active": True, "inspection_id": "insp_AAA", "trigger": "PIR"}
+
+        before = datetime.now(timezone.utc)
+        _fire_sensor_person_alert(DummyFrame(), person, identity_info, sensor_meta_insp1,
+                                  cfg, time.monotonic(), renderer, client=client)
+        after = datetime.now(timezone.utc)
+
+        files = sorted((Path(tmp) / "outbox").glob("*.json"))
+        assert len(files) == 1
+        event1 = json.loads(files[0].read_text())
+
+        # 1. snapshot_path present.
+        assert event1.get("snapshot_path", "").endswith(".jpg")
+        # 2 & 3. explicit UTC ISO-8601 timestamp, within this call's wall-clock window.
+        ts = datetime.strptime(event1["timestamp"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        assert before - timedelta(seconds=2) <= ts <= after + timedelta(seconds=2)
+        first_event_id = event1["event_id"]
+
+        # 4. SAME inspection + SAME person -> repeat firing reuses the identical
+        # event_id (overwrites the same outbox file rather than adding a second).
+        _fire_sensor_person_alert(DummyFrame(), person, identity_info, sensor_meta_insp1,
+                                  cfg, time.monotonic(), renderer, client=client)
+        files_same = sorted((Path(tmp) / "outbox").glob("*.json"))
+        assert len(files_same) == 1
+        assert json.loads(files_same[0].read_text())["event_id"] == first_event_id
+
+        # 5. A genuinely NEW inspection gets a fresh event_id (a second outbox file).
+        sensor_meta_insp2 = {"inspection_active": True, "inspection_id": "insp_BBB", "trigger": "PIR"}
+        _fire_sensor_person_alert(DummyFrame(), person, identity_info, sensor_meta_insp2,
+                                  cfg, time.monotonic(), renderer, client=client)
+        files_new = sorted((Path(tmp) / "outbox").glob("*.json"))
+        assert len(files_new) == 2
+        all_ids = {json.loads(f.read_text())["event_id"] for f in files_new}
+        assert first_event_id in all_ids and len(all_ids) == 2
+
+        # 6 & 7. Identity state and severity mapping unchanged.
+        assert event1["identity_status"] == "VERIFIED"
+        assert event1["person_name"] == "Felicia"
+        assert event1["severity"] == "High"
+        client.stop()
+
+
+def test_A_restricted_person_severity_critical_for_suspicious_and_suspended():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = FlowGuardApiClient(
+            api_url="http://mock-flowguard:5001", token="test-ingest-token", enabled=True,
+            device_id="securepi-bay1", camera_location="Loading Bay 01",
+            outbox_dir=Path(tmp) / "outbox", auto_flush=False,
+        )
+        cfg = Config(runtime_dir=Path(tmp))
+        cfg.snapshot_dir = Path(tmp) / "snapshots"
+        cfg.snapshot_dir.mkdir(parents=True, exist_ok=True)
+        renderer = MagicMock()
+
+        for status, person_id in (("SUSPICIOUS", 11), ("SUSPENDED", 12)):
+            identity_info = {"identity_status": status, "person_name": "Unknown Person",
+                             "person_role": None, "confidence": None}
+            person = PersonTrack(person_id=person_id, centroid=(0.0, 0.0), box=(1, 1, 2, 2), last_seen=0.0)
+            _fire_sensor_person_alert(DummyFrame(), person, identity_info,
+                                      {"inspection_id": f"insp_{person_id}"},
+                                      cfg, time.monotonic(), renderer, client=client)
+        files = sorted((Path(tmp) / "outbox").glob("*.json"))
+        events = [json.loads(f.read_text()) for f in files]
+        assert all(e["severity"] == "Critical" for e in events)
+        client.stop()
+
+
+def test_22_sensorbridge_never_fabricates_snapshot_identity_or_class():
+    bridge = SensorBridge(hours_start="00:00", hours_end="23:59", dry_run=True)
+    now = datetime.now(SGT)
+    line = json.dumps({"type": "sensor_status", "motion": True, "pir_ready": True})
+    event = bridge.process_line(line, now=now)
+    assert event is not None
+    assert "snapshot_path" not in event      # SensorBridge owns no camera
+    assert "person_name" not in event        # never invents an identity
+    assert "object_class" not in event       # never invents a pest/object class
+
+
+# --------------------------------------------------------------------------
+# Sensor-trigger + camera-confirmation single-alert pipeline
+# (feature/sensor-identity-integration dedup fix: SensorBridge is the TRIGGER,
+# securePi.py's camera-confirmed alert is the sole authoritative DetectionAlert)
+# --------------------------------------------------------------------------
+
+def test_sensor_camera_pipeline_single_authoritative_alert():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = FlowGuardApiClient(
+            api_url="http://mock-flowguard:5001", token="tok", enabled=True,
+            device_id="securepi-bay1", camera_location="Loading Bay 01",
+            outbox_dir=Path(tmp) / "outbox", auto_flush=False,
+        )
+        outbox = Path(tmp) / "outbox"
+
+        # A camera-attached bridge, exactly as securePi.py::run() constructs it.
+        bridge = SensorBridge(client=client, zone_name="Loading Bay",
+                              hours_start="00:00", hours_end="23:59",
+                              send_raw_alerts=False)
+        t0 = datetime.now(SGT)
+
+        # 1. Raw sensor trigger starts an inspection.
+        line_motion = json.dumps({"type": "sensor_status", "motion": True, "pir_ready": True})
+        raw_result = bridge.process_line(line_motion, now=t0)
+
+        # 2. The raw trigger alone creates NO user-facing FlowGuard alert.
+        assert raw_result is None
+        assert list(outbox.glob("*.json")) == []
+
+        # 3. Sensor telemetry still works even with alerts suppressed.
+        status = bridge.get_sensor_status(now=t0)
+        assert status["inspection_active"] is True
+        assert status["inspection_id"] is not None
+        assert status["pir"] is True
+        assert status["connected"] is True
+
+        inspection_id = status["inspection_id"]
+        sensor_metadata = dict(bridge.latest_sensor_metadata)
+        assert sensor_metadata["inspection_id"] == inspection_id
+
+        # 10. No visual confirmation yet -> still no fabricated detection alert.
+        assert list(outbox.glob("*.json")) == []
+
+        # --- Camera now confirms a person during this same inspection. ---
+        cfg = Config(runtime_dir=Path(tmp))
+        cfg.snapshot_dir = Path(tmp) / "snapshots"
+        cfg.snapshot_dir.mkdir(parents=True, exist_ok=True)
+        renderer = MagicMock()
+        identity_info = {"identity_status": "VERIFIED", "person_name": "Felicia",
+                         "person_role": "Staff", "confidence": 0.91}
+        person = PersonTrack(person_id=5, centroid=(0.0, 0.0), box=(1, 1, 2, 2), last_seen=0.0)
+
+        before = datetime.now(timezone.utc)
+        _fire_sensor_person_alert(DummyFrame(), person, identity_info, sensor_metadata,
+                                  cfg, time.monotonic(), renderer, client=client)
+        after = datetime.now(timezone.utc)
+
+        # 4. Exactly ONE FlowGuard alert exists for this physical occurrence.
+        files = list(outbox.glob("*.json"))
+        assert len(files) == 1
+        event = json.loads(files[0].read_text())
+
+        # 5. snapshot_path present.
+        assert event["snapshot_path"].endswith(".jpg")
+        # 6. explicit trigger timestamp, within this call's wall-clock window.
+        ts = datetime.strptime(event["timestamp"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        assert before - timedelta(seconds=2) <= ts <= after + timedelta(seconds=2)
+        # 7. inspection_id correlates the alert with its sensor trigger.
+        assert event["sensor_metadata"]["inspection_id"] == inspection_id
+        first_event_id = event["event_id"]
+
+        # 8. SAME inspection + SAME person -> repeat firing keeps the same event_id
+        # (overwrites the one outbox file rather than adding a second).
+        _fire_sensor_person_alert(DummyFrame(), person, identity_info, sensor_metadata,
+                                  cfg, time.monotonic(), renderer, client=client)
+        files_same = list(outbox.glob("*.json"))
+        assert len(files_same) == 1
+        assert json.loads(files_same[0].read_text())["event_id"] == first_event_id
+
+        # 9. A genuinely NEW inspection (motion drops, then rises again after the
+        # inspection window has expired) gets a fresh event_id.
+        t1 = t0 + timedelta(seconds=20)   # well past inspection_window_sec (10s default)
+        line_drop = json.dumps({"type": "sensor_status", "motion": False, "pir_ready": True})
+        assert bridge.process_line(line_drop, now=t1) is None
+        t2 = t1 + timedelta(seconds=1)
+        assert bridge.process_line(line_motion, now=t2) is None  # still no raw alert
+        status2 = bridge.get_sensor_status(now=t2)
+        new_inspection_id = status2["inspection_id"]
+        assert new_inspection_id is not None and new_inspection_id != inspection_id
+
+        _fire_sensor_person_alert(DummyFrame(), person, identity_info,
+                                  dict(bridge.latest_sensor_metadata),
+                                  cfg, time.monotonic(), renderer, client=client)
+        files_new = list(outbox.glob("*.json"))
+        assert len(files_new) == 2
+        all_ids = {json.loads(f.read_text())["event_id"] for f in files_new}
+        assert first_event_id in all_ids and len(all_ids) == 2
+
+        client.stop()
+
+
+def test_bag_and_pest_alerts_unaffected_by_sensor_raw_alert_suppression():
+    """11. Existing bag/pest behaviour keeps working when a send_raw_alerts=False
+    SensorBridge shares the same client/outbox -- the dedup fix must not leak
+    into unrelated alert types."""
+    with tempfile.TemporaryDirectory() as tmp:
+        client = FlowGuardApiClient(
+            api_url="http://mock-flowguard:5001", token="tok", enabled=True,
+            device_id="securepi-bay1", camera_location="Loading Bay 01",
+            outbox_dir=Path(tmp) / "outbox", auto_flush=False,
+        )
+        outbox = Path(tmp) / "outbox"
+        bridge = SensorBridge(client=client, zone_name="Loading Bay",
+                              hours_start="00:00", hours_end="23:59",
+                              send_raw_alerts=False)
+        now = datetime.now(SGT)
+        bridge.process_line(json.dumps({"type": "sensor_status", "motion": True, "pir_ready": True}), now=now)
+        assert list(outbox.glob("*.json")) == []  # sensor trigger alone: nothing yet
+
+        cfg = Config(runtime_dir=Path(tmp), zone="lobby")
+        cfg.snapshot_dir.mkdir(parents=True, exist_ok=True)
+        renderer = MagicMock()
+
+        bt = BagTracker(cfg)
+        bt.update([Detection("backpack", 0.9, (50, 60, 40, 40))], [], now=0.0)
+        bag = bt.bags[0]
+        bag.unattended_start = 0.0
+        _fire_alert(DummyFrame(), bag, cfg, now=cfg.unattended_time_sec + 5, renderer=renderer, client=client)
+
+        pest = TrackedPest(pest_id=1, label="rat", centroid=(5, 5), box=(5, 5, 10, 10),
+                           first_seen=0.0, last_seen=1.0, score=0.9)
+        _fire_pest_alert(DummyFrame(), pest, cfg, now=1.0, renderer=renderer, client=client)
+
+        files = list(outbox.glob("*.json"))
+        assert len(files) == 2   # exactly the bag + pest alerts, nothing from the sensor
+        event_types = {json.loads(f.read_text())["event_type"] for f in files}
+        assert event_types == {"unattended_object", "pest_detection"}
+        client.stop()
 
 
 # --------------------------------------------------------------------------

@@ -16,6 +16,7 @@ import json
 import sys
 import tempfile
 import types
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 EDGE_DIR = Path(__file__).resolve().parents[1]
@@ -145,6 +146,107 @@ def test_stable_event_id_across_cooldown_realert():
         _drain()
         assert bag.flowguard_event_id == first_id
         assert _only_event(client)["event_id"] == first_id  # still exactly one queued event
+        client.stop()
+
+
+def _ts_within(iso_string, before, after):
+    ts = datetime.strptime(iso_string, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return before - timedelta(seconds=2) <= ts <= after + timedelta(seconds=2)
+
+
+# --------------------------------------------------------------------------
+# B8-12. Unattended-object snapshot + explicit timestamp + stable event_id
+# --------------------------------------------------------------------------
+
+def test_B_unattended_alert_sends_snapshot_and_explicit_timestamp():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Config(runtime_dir=Path(tmp), zone="lobby")
+        client = _client(tmp)
+        bag = _bag(cfg)
+        securePi.LOGGER.disabled = True
+        try:
+            before = datetime.now(timezone.utc)
+            _fire_alert(FakeFrame(), bag, cfg, now=cfg.unattended_time_sec + 5,
+                       renderer=Renderer(cfg), client=client)
+            after = datetime.now(timezone.utc)
+        finally:
+            securePi.LOGGER.disabled = False
+        _drain()
+        event = _only_event(client)
+        assert event["snapshot_path"].endswith(".jpg")           # 8
+        assert _ts_within(event["timestamp"], before, after)     # 9
+        client.stop()
+
+
+def test_B_unattended_cooldown_realert_keeps_id_but_timestamp_advances():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Config(runtime_dir=Path(tmp), zone="lobby", alert_cooldown_sec=0.0)
+        client = _client(tmp)
+        bag = _bag(cfg)
+        securePi.LOGGER.disabled = True
+        try:
+            _fire_alert(FakeFrame(), bag, cfg, now=cfg.unattended_time_sec + 5,
+                       renderer=Renderer(cfg), client=client)
+            _drain()
+            first_event = _only_event(client)
+            # A second, later snapshot firing of the SAME unattended occurrence.
+            _fire_alert(FakeFrame(), bag, cfg, now=cfg.unattended_time_sec + 40,
+                       renderer=Renderer(cfg), client=client)
+        finally:
+            securePi.LOGGER.disabled = False
+        _drain()
+        second_event = _only_event(client)
+        assert second_event["event_id"] == first_event["event_id"]  # 10. stable
+        assert second_event["timestamp"] >= first_event["timestamp"]  # 11. newer/equal
+        # duration_seconds must still reflect the later firing, not be broken by
+        # the timestamp change.
+        assert second_event["duration_seconds"] > first_event["duration_seconds"]
+        client.stop()
+
+
+# --------------------------------------------------------------------------
+# C13-16. Pest snapshot + explicit timestamp + stable event_id + label fidelity
+# --------------------------------------------------------------------------
+
+def test_C_pest_alert_sends_snapshot_and_explicit_timestamp():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Config(runtime_dir=Path(tmp), zone="kitchen")
+        client = _client(tmp)
+        pest = TrackedPest(pest_id=9, label="mouse", centroid=(10, 10), box=(10, 10, 20, 20),
+                           first_seen=0.0, last_seen=1.0, score=0.9)
+        securePi.LOGGER.disabled = True
+        try:
+            before = datetime.now(timezone.utc)
+            _fire_pest_alert(FakeFrame(), pest, cfg, now=1.0, renderer=Renderer(cfg), client=client)
+            after = datetime.now(timezone.utc)
+        finally:
+            securePi.LOGGER.disabled = False
+        _drain()
+        event = _only_event(client)
+        assert event["snapshot_path"].endswith(".jpg")     # 13
+        assert _ts_within(event["timestamp"], before, after)  # 14
+        assert event["object_class"] == "mouse"             # 16. mouse stays mouse
+        client.stop()
+
+
+def test_C_pest_cooldown_realert_stable_event_id_rat_label_preserved():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Config(runtime_dir=Path(tmp), zone="kitchen", pest_alert_cooldown_sec=0.0)
+        client = _client(tmp)
+        pest = TrackedPest(pest_id=2, label="rat", centroid=(5, 5), box=(5, 5, 10, 10),
+                           first_seen=0.0, last_seen=1.0, score=0.95)
+        securePi.LOGGER.disabled = True
+        try:
+            _fire_pest_alert(FakeFrame(), pest, cfg, now=1.0, renderer=Renderer(cfg), client=client)
+            _drain()
+            first_event = _only_event(client)
+            _fire_pest_alert(FakeFrame(), pest, cfg, now=31.0, renderer=Renderer(cfg), client=client)
+        finally:
+            securePi.LOGGER.disabled = False
+        _drain()
+        second_event = _only_event(client)
+        assert second_event["event_id"] == first_event["event_id"]  # 15. stable across cooldown
+        assert second_event["object_class"] == "rat"                 # 16. rat stays rat, never generic
         client.stop()
 
 

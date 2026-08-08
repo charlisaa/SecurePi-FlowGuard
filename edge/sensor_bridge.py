@@ -99,6 +99,7 @@ class SensorBridge:
         inspection_window_sec: float = 10.0,
         device_id: Optional[str] = None,
         dry_run: bool = False,
+        send_raw_alerts: bool = True,
         logger: Optional[logging.Logger] = None,
     ):
         self.client = client
@@ -110,6 +111,17 @@ class SensorBridge:
         self.inspection_window_sec = float(inspection_window_sec)
         self.device_id = device_id or (getattr(client, "device_id", None) if client else None) or "securepi-sensor"
         self.dry_run = bool(dry_run)
+        # True (default): this bridge is the sole alert source (the documented
+        # standalone `securepi-sensor-bridge.service` deployment, with no camera
+        # attached) -- process_line() builds and sends its own raw Restricted-Zone
+        # Motion event, exactly as before this flag existed.
+        # False: a camera (securePi.py) is attached and owns the authoritative,
+        # visually-confirmed DetectionAlert for this same physical trigger --
+        # process_line() still opens/extends the inspection window and updates all
+        # telemetry (connected/PIR/ultrasonic/inspection_id/after_hours), it just
+        # never builds or enqueues an alert of its own, so one physical trigger
+        # can never produce two FlowGuard alerts under two unrelated event_ids.
+        self.send_raw_alerts = bool(send_raw_alerts)
         self.log = logger or LOGGER
 
         self._prev_motion = False
@@ -207,9 +219,12 @@ class SensorBridge:
             }
 
     def process_line(self, line: str, now: Optional[datetime] = None) -> Optional[dict]:
-        """Process one serial line. Returns the event dict when an alert fires
-        (also enqueued / printed as a side effect), else None. ``now`` is injectable
-        for tests; production uses Singapore wall-clock."""
+        """Process one serial line. Returns the event dict when this bridge's OWN
+        alert fires (also enqueued / printed as a side effect), else None -- always
+        None when ``send_raw_alerts`` is False, even though the inspection window
+        and telemetry (inspection_id, connected, PIR/ultrasonic state, after_hours)
+        still update normally. ``now`` is injectable for tests; production uses
+        Singapore wall-clock."""
         if now is None:
             now = datetime.now(SGT)
 
@@ -267,8 +282,16 @@ class SensorBridge:
             "uptime_ms": data.get("uptime_ms"),
         }
 
-        # Activate bounded inspection window
+        # Activate bounded inspection window. This telemetry update always
+        # happens, regardless of send_raw_alerts -- inspection_id/state must
+        # keep working whether or not this bridge sends its own alert.
         self.trigger_inspection(sensor_metadata, trigger_type=trigger_type, now=now)
+
+        if not self.send_raw_alerts:
+            # A camera owns the authoritative alert for this trigger (see
+            # securePi.py::run()); sending one here too would duplicate it
+            # under an unrelated event_id. No alert fired from this bridge.
+            return None
 
         # Cooldown between motion alerts.
         if self._last_alert_dt is not None and (now - self._last_alert_dt).total_seconds() < self.cooldown_sec:

@@ -10,6 +10,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import urllib.error
 from pathlib import Path
 
@@ -214,6 +216,80 @@ def test_stop_closes_worker_cleanly():
         client.stop(wait=True)                 # must drain and not raise
         # After stop, further enqueues are no-ops (stopped) and don't crash.
         assert client.enqueue_event(_event(client)) is None
+
+
+# ---- D17-19: outbox preserves event_id/timestamp/snapshot_path across retry ----
+
+def test_retry_preserves_event_id_timestamp_and_snapshot_path():
+    with tempfile.TemporaryDirectory() as tmp:
+        client = _client(tmp, urlopen_status(500))  # always retryable
+        event = _event(client, snapshot_path="runtime/snapshots/lobby/original.jpg")
+        path = client.enqueue_event(event)
+        before = json.loads(path.read_text())
+
+        client.flush_outbox()  # 500 -> kept, this is the "Wi-Fi retry"
+
+        after = json.loads(path.read_text())
+        assert after["event_id"] == before["event_id"]              # 17
+        assert after["timestamp"] == before["timestamp"]            # 18
+        assert after["snapshot_path"] == before["snapshot_path"]    # 19, same filename
+        assert after["snapshot_path"] == "runtime/snapshots/lobby/original.jpg"
+
+
+def _header(headers: dict, name: str) -> str:
+    name = name.lower()
+    for k, v in headers.items():
+        if k.lower() == name:
+            return v
+    return ""
+
+
+# ---- D20-21: snapshot write/send race -------------------------------------
+
+def test_snapshot_write_delay_still_uploads_full_multipart_image():
+    """Mirrors save_snapshot()'s async write: the JPEG lands a beat after the
+    event is queued, well inside _wait_for_snapshot_file's bound. The sender
+    must wait for it and upload the real bytes, not a truncated/partial file."""
+    with tempfile.TemporaryDirectory() as tmp:
+        snap_path = Path(tmp) / "delayed.jpg"
+        posted = {}
+
+        def fake_urlopen(req, timeout=None):
+            posted["headers"] = dict(req.headers)
+            posted["body"] = req.data
+            return FakeResp(201)
+
+        client = _client(tmp, fake_urlopen)
+        event = _event(client, snapshot_path=str(snap_path))
+
+        def _delayed_write():
+            time.sleep(0.15)
+            snap_path.write_bytes(b"\xff\xd8\xff\xe0real-jpeg-bytes\xff\xd9")
+
+        threading.Thread(target=_delayed_write, daemon=True).start()
+
+        classification, status, _ = client.send_event(event)
+        assert classification == fg.SUCCESS
+        assert _header(posted["headers"], "Content-type").startswith("multipart/form-data")
+        assert b"real-jpeg-bytes" in posted["body"]  # full image, not a partial write
+
+
+def test_snapshot_never_arrives_falls_back_to_json_without_losing_alert():
+    with tempfile.TemporaryDirectory() as tmp:
+        missing_path = Path(tmp) / "never-written.jpg"  # deliberately never created
+        posted = {}
+
+        def fake_urlopen(req, timeout=None):
+            posted["headers"] = dict(req.headers)
+            posted["body"] = req.data
+            return FakeResp(201)
+
+        client = _client(tmp, fake_urlopen)
+        event = _event(client, snapshot_path=str(missing_path))
+        classification, status, _ = client.send_event(event)
+        assert classification == fg.SUCCESS  # alert still delivered
+        assert not _header(posted["headers"], "Content-type").startswith("multipart/form-data")
+        assert json.loads(posted["body"])["event_id"] == event["event_id"]
 
 
 if __name__ == "__main__":
