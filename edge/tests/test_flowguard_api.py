@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import urllib.error
 from pathlib import Path
 
@@ -290,6 +291,53 @@ def test_snapshot_never_arrives_falls_back_to_json_without_losing_alert():
         assert classification == fg.SUCCESS  # alert still delivered
         assert not _header(posted["headers"], "Content-type").startswith("multipart/form-data")
         assert json.loads(posted["body"])["event_id"] == event["event_id"]
+
+
+# ---- D22: snapshot_url confirmation in the accepted-response log -----------
+
+def test_missing_snapshot_url_in_response_logs_warning():
+    """The backend accepted the upload (2xx) but its JSON body has no
+    snapshot_url — the dashboard can't show a picture. This must surface as a
+    warning, not pass silently."""
+    with tempfile.TemporaryDirectory() as tmp:
+        snap_path = Path(tmp) / "shot.jpg"
+        snap_path.write_bytes(b"\xff\xd8\xff\xe0real-jpeg-bytes\xff\xd9")
+
+        def fake_urlopen(req, timeout=None):
+            return FakeResp(201, body=b'{"ok": true}')  # no snapshot_url
+
+        warnings = []
+        logger = types.SimpleNamespace(
+            info=lambda *a, **k: None,
+            warning=lambda msg, *a, **k: warnings.append(msg % a if a else msg),
+            error=lambda *a, **k: None,
+        )
+        client = _client(tmp, fake_urlopen, logger=logger)
+        event = _event(client, snapshot_path=str(snap_path))
+        classification, status, _ = client.send_event(event)
+        assert classification == fg.SUCCESS
+        assert any("snapshot_url" in w for w in warnings)
+
+
+def test_present_snapshot_url_in_response_logs_no_warning():
+    with tempfile.TemporaryDirectory() as tmp:
+        snap_path = Path(tmp) / "shot.jpg"
+        snap_path.write_bytes(b"\xff\xd8\xff\xe0real-jpeg-bytes\xff\xd9")
+
+        def fake_urlopen(req, timeout=None):
+            return FakeResp(201, body=b'{"snapshot_url": "/api/detection-alerts/5/snapshot/x.jpg"}')
+
+        warnings = []
+        logger = types.SimpleNamespace(
+            info=lambda *a, **k: None,
+            warning=lambda msg, *a, **k: warnings.append(msg % a if a else msg),
+            error=lambda *a, **k: None,
+        )
+        client = _client(tmp, fake_urlopen, logger=logger)
+        event = _event(client, snapshot_path=str(snap_path))
+        classification, status, _ = client.send_event(event)
+        assert classification == fg.SUCCESS
+        assert not warnings
 
 
 if __name__ == "__main__":

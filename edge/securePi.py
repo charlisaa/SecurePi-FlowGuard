@@ -966,15 +966,31 @@ def save_snapshot_worker(frame_copy, path: Path, directory: Path, keep: int) -> 
     """Write via a temp file + atomic rename so a concurrent reader (the FlowGuard
     sender polling this exact path, see flowguard_api._wait_for_snapshot_file) can
     never observe a partially-written JPEG -- the file only appears at its final
-    name once cv2.imwrite has fully finished writing it."""
+    name once the encoded bytes are fully flushed to disk.
+
+    Encodes explicitly with cv2.imencode() rather than calling cv2.imwrite() on
+    the temp path directly: imwrite() picks its codec from the DESTINATION
+    FILENAME's extension, and the temp file's ".jpg.tmp" suffix is not a
+    recognised one, so OpenCV raises "could not find a writer for the specified
+    extension" and no file is ever written -- silently, since nothing here was
+    catching it before. imencode()'s format comes from the literal ".jpg"
+    argument, never the destination path, so it's unaffected by any temp suffix.
+    """
     tmp_path = path.with_name(path.name + ".tmp")
     try:
-        ok = cv2.imwrite(str(tmp_path), frame_copy)
-        if ok:
-            os.replace(tmp_path, path)  # atomic on the same filesystem
-            LOGGER.info("Saved alert snapshot: %s", path)
-        else:
-            LOGGER.error("Failed to save alert snapshot: %s", path)
+        ok, encoded = cv2.imencode(".jpg", frame_copy)
+        if not ok:
+            LOGGER.error("Failed to encode alert snapshot: %s", path)
+            return
+        LOGGER.info("[SecurePi] Snapshot JPEG encoded successfully: %s", path.name)
+        with open(tmp_path, "wb") as handle:
+            handle.write(bytes(encoded))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)  # atomic on the same filesystem
+        LOGGER.info("[SecurePi] Saved alert snapshot: %s", path)
+    except Exception as exc:  # pragma: no cover - defensive; a snapshot failure must never crash the worker
+        LOGGER.error("Failed to save alert snapshot %s: %s", path, exc)
     finally:
         # No-op if the replace above already moved it away.
         try:

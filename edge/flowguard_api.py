@@ -450,8 +450,39 @@ class FlowGuardApiClient:
         snapshot_path = event.get("snapshot_path")
         image_bytes = self._prepare_snapshot_bytes(snapshot_path) if snapshot_path else None
         if image_bytes is not None:
-            return self._post_multipart(url, event, image_bytes)
-        return self._post_json(url, event)
+            result = self._post_multipart(url, event, image_bytes)
+        else:
+            result = self._post_json(url, event)
+        classification, _status, raw = result
+        if classification == SUCCESS:
+            self._log_success_response(event, raw, snapshot_uploaded=image_bytes is not None)
+        return result
+
+    def _log_success_response(self, event: dict, raw: Optional[bytes], *, snapshot_uploaded: bool) -> None:
+        """Log the backend's response body for every accepted event and, when a
+        snapshot was uploaded, verify the response actually carries a
+        ``snapshot_url`` — without it the FlowGuard UI has nothing to render, even
+        though the alert itself was accepted."""
+        body_text = raw.decode("utf-8", errors="replace") if raw else ""
+        self.log.info(
+            "[FlowGuard] Event %s accepted: %s", event.get("event_id"), body_text[:500],
+        )
+        if not snapshot_uploaded:
+            return
+        snapshot_url = None
+        try:
+            parsed = json.loads(body_text) if body_text else {}
+            snapshot_url = parsed.get("snapshot_url")
+            if not snapshot_url and isinstance(parsed.get("alert"), dict):
+                snapshot_url = parsed["alert"].get("snapshot_url")
+        except ValueError:
+            pass
+        if not snapshot_url:
+            self.log.warning(
+                "[FlowGuard] Event %s uploaded a snapshot but the response had no "
+                "snapshot_url — the dashboard will not show a picture for this alert. "
+                "Response: %s", event.get("event_id"), body_text[:500],
+            )
 
     def _post_json(self, url: str, event: dict):
         body = json.dumps(event).encode("utf-8")

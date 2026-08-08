@@ -22,10 +22,12 @@ from pathlib import Path
 EDGE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EDGE_DIR))
 
-# Stub cv2 BEFORE importing securePi (mirrors test_securepi.py). imwrite writes a
-# real file so snapshot globbing works; drawing calls are no-ops here.
+# Stub cv2 BEFORE importing securePi (mirrors test_securepi.py). imencode is what
+# save_snapshot_worker actually calls now; imwrite is kept for anything else that
+# might still use it. Drawing calls are no-ops here.
 _cv2 = types.SimpleNamespace(
     imwrite=lambda path, img: bool(Path(path).write_bytes(b"jpg")) or True,
+    imencode=lambda ext, img, params=None: (True, b"jpg"),
     rectangle=lambda *a, **k: None,
     putText=lambda *a, **k: None,
     FONT_HERSHEY_SIMPLEX=0,
