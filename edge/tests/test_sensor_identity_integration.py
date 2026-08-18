@@ -62,8 +62,14 @@ from securePi import (
     Config, Detection, PersonTracker, BagTracker, PestTracker, PersonTrack, TrackedPest,
     _recognize_person_with_flowguard, reset_face_cache, _fire_sensor_person_alert,
     _fire_alert, _fire_pest_alert,
-    StreamServer, FrameBuffer, FACE_EXECUTOR
+    StreamServer, FrameBuffer, FACE_EXECUTOR, SNAPSHOT_EXECUTOR
 )
+
+
+def _drain_snapshots():
+    """Block until the single-worker snapshot/log executor has flushed, so async
+    disk writes cannot race a TemporaryDirectory cleanup (Windows WinError 145)."""
+    SNAPSHOT_EXECUTOR.submit(lambda: None).result()
 
 
 def DummyFrame():
@@ -558,6 +564,150 @@ def test_bag_and_pest_alerts_unaffected_by_sensor_raw_alert_suppression():
         assert len(files) == 2   # exactly the bag + pest alerts, nothing from the sensor
         event_types = {json.loads(f.read_text())["event_type"] for f in files}
         assert event_types == {"unattended_object", "pest_detection"}
+        client.stop()
+
+
+# --------------------------------------------------------------------------
+# Sensor-identity context on camera-confirmed pest / unattended-object alerts
+# (feature: propagate the active-inspection metadata into the SAME authoritative
+# detection event, without fabricating context for AI-only detections).
+# --------------------------------------------------------------------------
+
+def _client_and_cfg(tmp):
+    client = FlowGuardApiClient(
+        api_url="http://mock-flowguard:5001", token="tok", enabled=True,
+        device_id="securepi-bay1", camera_location="Loading Bay 01",
+        outbox_dir=Path(tmp) / "outbox", auto_flush=False,
+    )
+    cfg = Config(runtime_dir=Path(tmp), zone="lobby")
+    cfg.snapshot_dir.mkdir(parents=True, exist_ok=True)
+    return client, cfg
+
+
+def _make_bag(cfg):
+    bt = BagTracker(cfg)
+    bt.update([Detection("backpack", 0.9, (50, 60, 40, 40))], [], now=0.0)
+    bag = bt.bags[0]
+    bag.unattended_start = 0.0
+    return bag
+
+
+def _make_pest():
+    return TrackedPest(pest_id=1, label="rat", centroid=(5, 5), box=(5, 5, 10, 10),
+                       first_seen=0.0, last_seen=1.0, score=0.9)
+
+
+PIR_META = {
+    "trigger": "PIR", "pir": True, "motion": True, "pir_ready": True,
+    "distance_cm": 42.5, "distance_change_cm": 77.5, "object_close": True,
+    "inspection_active": True, "inspection_id": "insp_PEST_1", "after_hours": True,
+}
+
+
+def test_pest_alert_carries_sensor_metadata_when_supplied():
+    """Requirement 1: a camera-confirmed pest alert propagates active-inspection
+    sensor metadata into the SAME event when supplied at the call site."""
+    with tempfile.TemporaryDirectory() as tmp:
+        client, cfg = _client_and_cfg(tmp)
+        outbox = Path(tmp) / "outbox"
+        _fire_pest_alert(DummyFrame(), _make_pest(), cfg, now=1.0,
+                         renderer=MagicMock(), client=client,
+                         sensor_metadata=dict(PIR_META))
+        files = list(outbox.glob("*.json"))
+        assert len(files) == 1
+        event = json.loads(files[0].read_text())
+        assert event["event_type"] == "pest_detection"
+        assert event["object_class"] == "rat"        # class unchanged
+        assert event["sensor_metadata"]["trigger"] == "PIR"
+        assert event["sensor_metadata"]["distance_change_cm"] == 77.5
+        assert event["sensor_metadata"]["inspection_id"] == "insp_PEST_1"
+        _drain_snapshots()
+        client.stop()
+
+
+def test_unattended_alert_carries_sensor_metadata_when_supplied():
+    """Requirement 2: a camera-confirmed unattended-object alert propagates
+    active-inspection sensor metadata into the SAME event when supplied."""
+    with tempfile.TemporaryDirectory() as tmp:
+        client, cfg = _client_and_cfg(tmp)
+        outbox = Path(tmp) / "outbox"
+        meta = dict(PIR_META, trigger="ULTRASONIC", inspection_id="insp_BAG_1")
+        _fire_alert(DummyFrame(), _make_bag(cfg), cfg,
+                    now=cfg.unattended_time_sec + 5, renderer=MagicMock(),
+                    client=client, sensor_metadata=meta)
+        files = list(outbox.glob("*.json"))
+        assert len(files) == 1
+        event = json.loads(files[0].read_text())
+        assert event["event_type"] == "unattended_object"
+        assert event["object_class"] == "backpack"    # class unchanged
+        assert event["sensor_metadata"]["trigger"] == "ULTRASONIC"
+        assert event["sensor_metadata"]["inspection_id"] == "insp_BAG_1"
+        _drain_snapshots()
+        client.stop()
+
+
+def test_pest_alert_without_sensor_metadata_stays_sensor_free():
+    """Requirements 3 & 9: an AI-only pest detection (no active inspection) never
+    fabricates sensor context -- the payload omits sensor_metadata entirely."""
+    with tempfile.TemporaryDirectory() as tmp:
+        client, cfg = _client_and_cfg(tmp)
+        outbox = Path(tmp) / "outbox"
+        _fire_pest_alert(DummyFrame(), _make_pest(), cfg, now=1.0,
+                         renderer=MagicMock(), client=client)  # no sensor_metadata
+        event = json.loads(list(outbox.glob("*.json"))[0].read_text())
+        assert event["event_type"] == "pest_detection"
+        assert "sensor_metadata" not in event   # None dropped by build_event
+        _drain_snapshots()
+        client.stop()
+
+
+def test_unattended_alert_without_sensor_metadata_stays_sensor_free():
+    """Requirements 4 & 9: an AI-only unattended-object detection stays sensor-free."""
+    with tempfile.TemporaryDirectory() as tmp:
+        client, cfg = _client_and_cfg(tmp)
+        outbox = Path(tmp) / "outbox"
+        _fire_alert(DummyFrame(), _make_bag(cfg), cfg,
+                    now=cfg.unattended_time_sec + 5, renderer=MagicMock(),
+                    client=client)  # no sensor_metadata
+        event = json.loads(list(outbox.glob("*.json"))[0].read_text())
+        assert event["event_type"] == "unattended_object"
+        assert "sensor_metadata" not in event
+        _drain_snapshots()
+        client.stop()
+
+
+def test_pest_event_id_stable_regardless_of_sensor_metadata():
+    """Requirement 6: attaching sensor metadata does not change the deterministic
+    event_id -- the same physical occurrence keeps one stable id."""
+    with tempfile.TemporaryDirectory() as tmp:
+        client, cfg = _client_and_cfg(tmp)
+        pest = _make_pest()
+        _fire_pest_alert(DummyFrame(), pest, cfg, now=1.0, renderer=MagicMock(),
+                         client=client, sensor_metadata=dict(PIR_META))
+        first_id = pest.flowguard_event_id
+        # A re-alert of the SAME pest (with or without metadata) reuses the id.
+        _fire_pest_alert(DummyFrame(), pest, cfg, now=2.0, renderer=MagicMock(),
+                         client=client)
+        assert pest.flowguard_event_id == first_id
+        _drain_snapshots()
+        client.stop()
+
+
+def test_attached_sensor_metadata_is_isolated_copy():
+    """Later mutation of the bridge state must not alter metadata already attached
+    to a created event -- the call site copies with dict(sensor_meta)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        client, cfg = _client_and_cfg(tmp)
+        outbox = Path(tmp) / "outbox"
+        live_meta = dict(PIR_META)
+        snapshot_copy = dict(live_meta)          # what the loop passes: dict(sensor_meta)
+        _fire_pest_alert(DummyFrame(), _make_pest(), cfg, now=1.0,
+                         renderer=MagicMock(), client=client,
+                         sensor_metadata=snapshot_copy)
+        live_meta["trigger"] = "MUTATED"         # bridge state changes afterwards
+        event = json.loads(list(outbox.glob("*.json"))[0].read_text())
+        assert event["sensor_metadata"]["trigger"] == "PIR"
+        _drain_snapshots()
         client.stop()
 
 

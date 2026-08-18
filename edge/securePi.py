@@ -1136,7 +1136,7 @@ def _fire_sensor_person_alert(frame, person, identity_info: dict, sensor_metadat
 
 
 def _fire_alert(frame, bag: TrackedBag, config: Config, now: float,
-                renderer: "Renderer", *, client=None) -> None:
+                renderer: "Renderer", *, client=None, sensor_metadata=None) -> None:
     # ONE wall-clock read for this alert firing -- reused for the snapshot filename,
     # any newly-minted event_id, and the FlowGuard payload timestamp.
     trigger_ts = datetime.now(timezone.utc)
@@ -1173,11 +1173,12 @@ def _fire_alert(frame, bag: TrackedBag, config: Config, now: float,
                            alert_type="Unattended Object", object_class=object_class,
                            confidence=bag.score or None, duration_seconds=duration,
                            track_id=bag.bag_id, snapshot_path=snapshot_path,
-                           event_id=bag.flowguard_event_id, timestamp=trigger_ts)
+                           event_id=bag.flowguard_event_id, timestamp=trigger_ts,
+                           sensor_metadata=sensor_metadata)
 
 
 def _fire_pest_alert(frame, pest: TrackedPest, config: Config, now: float,
-                     renderer: "Renderer", *, client=None) -> None:
+                     renderer: "Renderer", *, client=None, sensor_metadata=None) -> None:
     # ONE wall-clock read for this alert firing -- reused for the snapshot filename,
     # any newly-minted event_id, and the FlowGuard payload timestamp.
     trigger_ts = datetime.now(timezone.utc)
@@ -1208,7 +1209,8 @@ def _fire_pest_alert(frame, pest: TrackedPest, config: Config, now: float,
                            alert_type="Pest Detection", object_class=pest.label,
                            confidence=pest.score or None, duration_seconds=None,
                            track_id=pest.pest_id, snapshot_path=snapshot_path,
-                           event_id=pest.flowguard_event_id, timestamp=trigger_ts)
+                           event_id=pest.flowguard_event_id, timestamp=trigger_ts,
+                           sensor_metadata=sensor_metadata)
 
 
 class Renderer:
@@ -1649,12 +1651,19 @@ def run(config: Config, client=None, sensor_bridge=None) -> None:
                 inst = 1.0 / dt
                 fps = inst if fps == 0.0 else 0.9 * fps + 0.1 * inst
 
+            # Read the sensor-inspection state ONCE per loop, before the frame
+            # branch, so the same authoritative snapshot is available both to the
+            # person path (inside the frame block) and to the bag/pest alert loops
+            # below (which run even when frame is None). Only a genuinely active
+            # inspection carries metadata; otherwise sensor_meta stays empty so no
+            # sensor context is ever fabricated for an AI-only detection.
+            inspection_active = sensor_bridge.is_inspection_active() if sensor_bridge else False
+            sensor_meta = sensor_bridge.latest_sensor_metadata if (sensor_bridge and inspection_active) else {}
+
             if frame is not None:
                 owner_ids = {b.owner_id for b in tracker.bags.values()
                              if b.owner_id is not None}
                 visible_persons = 0
-                inspection_active = sensor_bridge.is_inspection_active() if sensor_bridge else False
-                sensor_meta = sensor_bridge.latest_sensor_metadata if (sensor_bridge and inspection_active) else {}
 
                 for person in persons:
                     if now - person.last_seen > config.draw_grace_sec:
@@ -1686,10 +1695,20 @@ def run(config: Config, client=None, sensor_bridge=None) -> None:
                 renderer.draw_hud(frame, visible_persons, len(tracker.bags),
                                   len(pest_tracker.pests), fps)
 
+            # Attach a COPY of the current sensor metadata to a camera-confirmed
+            # bag/pest alert ONLY when a genuine inspection is active (and actually
+            # produced metadata). Copying isolates the already-built event from any
+            # later mutation of the bridge state. When no inspection is active this
+            # is None, so an AI-only detection carries no sensor context whatsoever.
+            alert_sensor_meta = (dict(sensor_meta)
+                                 if (sensor_bridge and inspection_active and sensor_meta)
+                                 else None)
             for bag in bag_alerts_due:
-                _fire_alert(frame, bag, config, now, renderer, client=client)
+                _fire_alert(frame, bag, config, now, renderer, client=client,
+                            sensor_metadata=alert_sensor_meta)
             for pest in pest_alerts_due:
-                _fire_pest_alert(frame, pest, config, now, renderer, client=client)
+                _fire_pest_alert(frame, pest, config, now, renderer, client=client,
+                                 sensor_metadata=alert_sensor_meta)
 
             # Publish only after every annotation (including any alert box just
             # stamped above) is on the frame, so the stream shows exactly what
